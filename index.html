@@ -1,0 +1,34 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Cờ Caro - Gomoku</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="container">
+        <h1>Cờ Caro</h1>
+
+        <div class="game-info">
+            <div class="status" id="status">Lượt của: <span class="player-x">X</span></div>
+            <button id="resetBtn" class="reset-btn">Chơi Lại</button>
+        </div>
+
+        <div class="board-container">
+            <div id="board" class="board"></div>
+        </div>
+
+        <div class="rules">
+            <h3>Luật Chơi:</h3>
+            <ul>
+                <li>2 người chơi lần lượt đặt quân X và O</li>
+                <li>Người đầu tiên xếp được 5 quân liên tiếp (ngang, dọc, hoặc chéo) sẽ thắng</li>
+                <li>Bàn cờ 15×15 ô</li>
+            </ul>
+        </div>
+    </div>
+
+    <script src="game.js"></script>
+</body>
+</html>
