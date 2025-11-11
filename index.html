@@ -3,122 +3,141 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Cờ Caro Pro - Game Cờ Caro Thông Minh</title>
+    <title>Cờ Caro</title>
     <link rel="stylesheet" href="style.css">
 </head>
 <body>
     <div class="container">
         <div class="header">
-            <h1>🎮 Cờ Caro Pro</h1>
-            <button id="darkModeToggle" class="dark-mode-toggle" title="Chuyển chế độ tối">🌙</button>
-        </div>
-
-        <!-- Settings Panel -->
-        <div class="settings-panel" id="settingsPanel">
-            <h3>⚙️ Cài Đặt Game</h3>
-
-            <div class="setting-group">
-                <label>Chế độ chơi:</label>
-                <select id="gameMode" class="select-input">
-                    <option value="pvp">Người vs Người</option>
-                    <option value="pvc">Người vs Máy</option>
-                </select>
-            </div>
-
-            <div class="setting-group" id="aiDifficultyGroup" style="display: none;">
-                <label>Độ khó AI:</label>
-                <select id="aiDifficulty" class="select-input">
-                    <option value="easy">Dễ</option>
-                    <option value="medium">Trung bình</option>
-                    <option value="hard">Khó</option>
-                </select>
-            </div>
-
-            <div class="setting-group">
-                <label>Kích thước bàn cờ:</label>
-                <select id="boardSize" class="select-input">
-                    <option value="10">10×10</option>
-                    <option value="15" selected>15×15</option>
-                    <option value="19">19×19</option>
-                </select>
-            </div>
-
-            <div class="setting-group">
-                <label>
-                    <input type="checkbox" id="soundToggle" checked>
-                    Bật âm thanh
-                </label>
-            </div>
-
-            <div class="setting-group">
-                <label>
-                    <input type="checkbox" id="timerToggle">
-                    Bật đồng hồ đếm giờ
-                </label>
-            </div>
-
-            <button id="startGameBtn" class="btn btn-primary">🎯 Bắt Đầu Game Mới</button>
-        </div>
-
-        <!-- Game Stats -->
-        <div class="stats-panel">
-            <div class="stat-box">
-                <div class="stat-label">X Thắng</div>
-                <div class="stat-value player-x" id="xWins">0</div>
-            </div>
-            <div class="stat-box">
-                <div class="stat-label">Hòa</div>
-                <div class="stat-value" id="draws">0</div>
-            </div>
-            <div class="stat-box">
-                <div class="stat-label">O Thắng</div>
-                <div class="stat-value player-o" id="oWins">0</div>
+            <h1>Cờ Caro</h1>
+            <div class="header-controls">
+                <button id="settingsToggle" class="icon-btn" title="Cài đặt">
+                    <svg width="20" height="20" viewBox="0 0 20 20" fill="currentColor">
+                        <path d="M10 6a2 2 0 110-4 2 2 0 010 4zM10 12a2 2 0 110-4 2 2 0 010 4zM10 18a2 2 0 110-4 2 2 0 010 4z"/>
+                    </svg>
+                </button>
+                <button id="darkModeToggle" class="icon-btn" title="Chế độ tối">
+                    <svg width="20" height="20" viewBox="0 0 20 20" fill="currentColor">
+                        <path d="M17.293 13.293A8 8 0 016.707 2.707a8.001 8.001 0 1010.586 10.586z"/>
+                    </svg>
+                </button>
             </div>
         </div>
 
-        <!-- Game Info -->
-        <div class="game-info">
-            <div class="status-container">
-                <div class="status" id="status">Lượt của: <span class="player-x">X</span></div>
-                <div class="timer" id="timer" style="display: none;">
-                    <span id="timerDisplay">00:00</span>
+        <!-- Settings Panel - Hidden by default -->
+        <div class="settings-panel collapsed" id="settingsPanel">
+            <div class="settings-grid">
+                <div class="setting-item">
+                    <label>Chế độ</label>
+                    <select id="gameMode" class="select-input">
+                        <option value="pvp">2 Người</option>
+                        <option value="pvc">vs Máy</option>
+                    </select>
+                </div>
+
+                <div class="setting-item" id="aiDifficultyGroup" style="display: none;">
+                    <label>Độ khó</label>
+                    <select id="aiDifficulty" class="select-input">
+                        <option value="easy">Dễ</option>
+                        <option value="medium">Vừa</option>
+                        <option value="hard">Khó</option>
+                    </select>
+                </div>
+
+                <div class="setting-item">
+                    <label>Bàn cờ</label>
+                    <select id="boardSize" class="select-input">
+                        <option value="10">10×10</option>
+                        <option value="15" selected>15×15</option>
+                        <option value="19">19×19</option>
+                    </select>
+                </div>
+
+                <div class="setting-item toggle-item">
+                    <label>Âm thanh</label>
+                    <label class="switch">
+                        <input type="checkbox" id="soundToggle" checked>
+                        <span class="slider"></span>
+                    </label>
+                </div>
+
+                <div class="setting-item toggle-item">
+                    <label>Đồng hồ</label>
+                    <label class="switch">
+                        <input type="checkbox" id="timerToggle">
+                        <span class="slider"></span>
+                    </label>
                 </div>
             </div>
-            <div class="game-controls">
-                <button id="undoBtn" class="btn btn-secondary" disabled title="Hoàn tác">↶ Undo</button>
-                <button id="redoBtn" class="btn btn-secondary" disabled title="Làm lại">↷ Redo</button>
-                <button id="hintBtn" class="btn btn-secondary" title="Gợi ý nước đi">💡 Gợi ý</button>
-                <button id="resetBtn" class="btn btn-danger">🔄 Chơi Lại</button>
+
+            <button id="startGameBtn" class="btn btn-primary">Bắt đầu</button>
+        </div>
+
+        <!-- Compact Stats -->
+        <div class="stats-compact">
+            <div class="stat-item">
+                <span class="stat-value player-x" id="xWins">0</span>
+                <span class="stat-sep">–</span>
+                <span class="stat-value" id="draws">0</span>
+                <span class="stat-sep">–</span>
+                <span class="stat-value player-o" id="oWins">0</span>
+            </div>
+        </div>
+
+        <!-- Game Status -->
+        <div class="game-status">
+            <div class="status" id="status">Lượt <span class="player-x">X</span></div>
+            <div class="timer" id="timer" style="display: none;">
+                <span id="timerDisplay">00:00</span>
             </div>
         </div>
 
         <!-- Main Game Area -->
         <div class="game-container">
-            <!-- Board -->
-            <div class="board-container">
+            <div class="board-wrapper">
                 <canvas id="particles" class="particles-canvas"></canvas>
                 <div id="board" class="board"></div>
             </div>
 
-            <!-- Move History -->
-            <div class="history-panel">
-                <h3>📜 Lịch Sử Nước Đi</h3>
-                <div id="moveHistory" class="move-history"></div>
-                <button id="clearHistoryBtn" class="btn btn-small">Xóa lịch sử</button>
+            <div class="side-panel collapsed" id="sidePanel">
+                <button class="panel-toggle" id="historyToggle">
+                    <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
+                        <path d="M8 3.5a.5.5 0 00-1 0V9a.5.5 0 00.252.434l3.5 2a.5.5 0 00.496-.868L8 8.71V3.5z"/>
+                        <path d="M8 16A8 8 0 108 0a8 8 0 000 16zm7-8A7 7 0 111 8a7 7 0 0114 0z"/>
+                    </svg>
+                </button>
+                <div class="history-content">
+                    <h4>Lịch sử</h4>
+                    <div id="moveHistory" class="move-history"></div>
+                </div>
             </div>
         </div>
 
-        <!-- Rules -->
-        <div class="rules">
-            <h3>📖 Luật Chơi:</h3>
-            <ul>
-                <li>🎯 Hai người chơi lần lượt đặt quân X và O trên bàn cờ</li>
-                <li>🏆 Người đầu tiên xếp được 5 quân liên tiếp (ngang, dọc, hoặc chéo) sẽ thắng</li>
-                <li>🤖 Chế độ AI có 3 mức độ: Dễ, Trung bình, và Khó</li>
-                <li>💡 Sử dụng nút "Gợi ý" để nhận gợi ý nước đi tốt</li>
-                <li>↶↷ Sử dụng Undo/Redo để hoàn tác hoặc làm lại nước đi</li>
-                <li>🌙 Chuyển đổi chế độ Dark Mode cho trải nghiệm tốt hơn</li>
-            </ul>
+        <!-- Quick Actions -->
+        <div class="quick-actions">
+            <button id="undoBtn" class="action-btn" disabled title="Hoàn tác (⌘Z)">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M3 7v6h6"/>
+                    <path d="M21 17a9 9 0 00-9-9 9 9 0 00-6 2.3L3 13"/>
+                </svg>
+            </button>
+            <button id="redoBtn" class="action-btn" disabled title="Làm lại (⌘Y)">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M21 7v6h-6"/>
+                    <path d="M3 17a9 9 0 019-9 9 9 0 016 2.3l3 2.7"/>
+                </svg>
+            </button>
+            <button id="hintBtn" class="action-btn" title="Gợi ý (H)">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/>
+                </svg>
+            </button>
+            <button id="resetBtn" class="action-btn action-btn-primary" title="Chơi lại">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M23 4v6h-6M1 20v-6h6"/>
+                    <path d="M3.51 9a9 9 0 0114.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0020.49 15"/>
+                </svg>
+            </button>
         </div>
     </div>
 
