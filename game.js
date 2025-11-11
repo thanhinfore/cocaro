@@ -42,11 +42,14 @@ const boardSizeSelect = document.getElementById('boardSize');
 const soundToggle = document.getElementById('soundToggle');
 const timerToggle = document.getElementById('timerToggle');
 const darkModeToggle = document.getElementById('darkModeToggle');
+const settingsToggle = document.getElementById('settingsToggle');
+const settingsPanel = document.getElementById('settingsPanel');
+const historyToggle = document.getElementById('historyToggle');
+const sidePanel = document.getElementById('sidePanel');
 const undoBtn = document.getElementById('undoBtn');
 const redoBtn = document.getElementById('redoBtn');
 const hintBtn = document.getElementById('hintBtn');
 const moveHistoryElement = document.getElementById('moveHistory');
-const clearHistoryBtn = document.getElementById('clearHistoryBtn');
 const timerDisplay = document.getElementById('timerDisplay');
 const timerElement = document.getElementById('timer');
 
@@ -153,7 +156,8 @@ function makeMove(row, col, skipHistory = false) {
         gameActive = false;
         highlightWinningCells(winningCells);
         const winner = currentPlayer;
-        statusElement.innerHTML = `<span class="player-${currentPlayer.toLowerCase()}">🎉 Người chơi ${currentPlayer} thắng!</span>`;
+        const winnerName = (gameMode === 'pvc' && winner === 'O') ? 'AI' : winner;
+        statusElement.innerHTML = `<span class="player-${currentPlayer.toLowerCase()}">${winnerName} thắng</span>`;
         updateStats(winner);
         playSound('win');
         stopTimer();
@@ -165,7 +169,7 @@ function makeMove(row, col, skipHistory = false) {
     // Check for draw
     if (isBoardFull()) {
         gameActive = false;
-        statusElement.textContent = '🤝 Hòa!';
+        statusElement.textContent = 'Hòa';
         updateStats('draw');
         playSound('draw');
         stopTimer();
@@ -242,8 +246,8 @@ function isBoardFull() {
 function updateStatus() {
     if (!gameActive) return;
     const playerClass = currentPlayer === 'X' ? 'player-x' : 'player-o';
-    const playerName = (gameMode === 'pvc' && currentPlayer === 'O') ? '🤖 AI' : currentPlayer;
-    statusElement.innerHTML = `Lượt của: <span class="${playerClass}">${playerName}</span>`;
+    const playerName = (gameMode === 'pvc' && currentPlayer === 'O') ? 'AI' : currentPlayer;
+    statusElement.innerHTML = `Lượt <span class="${playerClass}">${playerName}</span>`;
 }
 
 // ================================
@@ -498,10 +502,11 @@ function redo() {
     if (winningCells) {
         gameActive = false;
         highlightWinningCells(winningCells);
-        statusElement.innerHTML = `<span class="player-${move.player.toLowerCase()}">🎉 Người chơi ${move.player} thắng!</span>`;
+        const winnerName = (gameMode === 'pvc' && move.player === 'O') ? 'AI' : move.player;
+        statusElement.innerHTML = `<span class="player-${move.player.toLowerCase()}">${winnerName} thắng</span>`;
     } else if (isBoardFull()) {
         gameActive = false;
-        statusElement.textContent = '🤝 Hòa!';
+        statusElement.textContent = 'Hòa';
     } else {
         gameActive = true;
         updateStatus();
@@ -755,7 +760,7 @@ function animateParticles() {
 function toggleDarkMode() {
     document.body.classList.toggle('dark-mode');
     const isDark = document.body.classList.contains('dark-mode');
-    darkModeToggle.textContent = isDark ? '☀️' : '🌙';
+    updateDarkModeIcon(isDark);
     localStorage.setItem('darkMode', isDark);
 }
 
@@ -763,8 +768,14 @@ function loadDarkMode() {
     const isDark = localStorage.getItem('darkMode') === 'true';
     if (isDark) {
         document.body.classList.add('dark-mode');
-        darkModeToggle.textContent = '☀️';
+        updateDarkModeIcon(true);
     }
+}
+
+function updateDarkModeIcon(isDark) {
+    darkModeToggle.innerHTML = isDark
+        ? '<svg width="20" height="20" viewBox="0 0 20 20" fill="currentColor"><circle cx="10" cy="10" r="4"/><path d="M10 0v2M10 18v2M20 10h-2M2 10H0M16.95 16.95l-1.41-1.41M4.46 4.46L3.05 3.05M16.95 3.05l-1.41 1.41M4.46 15.54L3.05 16.95"/></svg>'
+        : '<svg width="20" height="20" viewBox="0 0 20 20" fill="currentColor"><path d="M17.293 13.293A8 8 0 016.707 2.707a8.001 8.001 0 1010.586 10.586z"/></svg>';
 }
 
 // ================================
@@ -857,10 +868,12 @@ undoBtn.addEventListener('click', undo);
 redoBtn.addEventListener('click', redo);
 hintBtn.addEventListener('click', showHint);
 
-clearHistoryBtn.addEventListener('click', () => {
-    if (confirm('Bạn có chắc muốn xóa lịch sử nước đi?')) {
-        moveHistoryElement.innerHTML = '';
-    }
+settingsToggle.addEventListener('click', () => {
+    settingsPanel.classList.toggle('collapsed');
+});
+
+historyToggle.addEventListener('click', () => {
+    sidePanel.classList.toggle('collapsed');
 });
 
 // Keyboard shortcuts
