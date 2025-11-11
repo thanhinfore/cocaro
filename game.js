@@ -351,19 +351,58 @@ function getAIMove() {
         initZobrist();
     }
 
-    // Check for immediate winning move
-    const winMove = findImmediateWin('O');
-    if (winMove) return winMove;
+    // === CRITICAL DEFENSE FIRST - HIGHEST PRIORITY ===
 
-    // Check for immediate blocking move (including double threats)
+    // 1. Check if opponent can win in next move (scan ENTIRE board)
+    const opponentWinMove = scanForWinningMove('X');
+    if (opponentWinMove) {
+        console.log('🛡️ Blocking opponent winning move!');
+        return opponentWinMove;
+    }
+
+    // 2. Check for opponent's 4-in-a-row (must block immediately)
+    const opponentFourMove = scanForFourInRow('X');
+    if (opponentFourMove) {
+        console.log('🛡️ Blocking opponent 4-in-a-row!');
+        return opponentFourMove;
+    }
+
+    // 3. Check if WE can win in next move
+    const ourWinMove = scanForWinningMove('O');
+    if (ourWinMove) {
+        console.log('⚔️ Taking winning move!');
+        return ourWinMove;
+    }
+
+    // 4. Check for opponent's open three (very dangerous)
+    const opponentOpenThree = scanForOpenThree('X');
+    if (opponentOpenThree) {
+        console.log('🛡️ Blocking opponent open three!');
+        return opponentOpenThree;
+    }
+
+    // 5. Check if we can create 4-in-a-row
+    const ourFourMove = scanForFourInRow('O');
+    if (ourFourMove) {
+        console.log('⚔️ Creating 4-in-a-row!');
+        return ourFourMove;
+    }
+
+    // 6. Check for double threats from opponent
     const blockMove = findCriticalDefense('X');
-    if (blockMove) return blockMove;
+    if (blockMove) {
+        console.log('🛡️ Blocking critical threat!');
+        return blockMove;
+    }
 
-    // Check if we can create a winning threat
+    // 7. Try to create winning threat
     const winThreat = findWinningThreat('O');
-    if (winThreat) return winThreat;
+    if (winThreat) {
+        console.log('⚔️ Creating winning threat!');
+        return winThreat;
+    }
 
-    // Try learned opening first (if available)
+    // 8. Try learned opening first (if available)
     if (moveHistory.length > 0 && moveHistory.length <= 5) {
         const learnedMove = getLearnedOpening();
         if (learnedMove) {
@@ -372,34 +411,194 @@ function getAIMove() {
         }
     }
 
-    // Opening book for first few moves
+    // 9. Opening book for first few moves
     if (moveHistory.length <= 4) {
         const openingMove = getOpeningMove();
         if (openingMove) return openingMove;
     }
 
-    // Use iterative deepening with VCF search
+    // 10. Use iterative deepening with VCF search
     return getBestMoveIterative();
 }
 
-// Find immediate winning move or blocking move
-function findImmediateWin(player) {
-    const relevantCells = getRelevantCells();
+// Scan ENTIRE board for winning move (comprehensive check)
+function scanForWinningMove(player) {
+    // Check EVERY empty cell on the board
+    for (let row = 0; row < BOARD_SIZE; row++) {
+        for (let col = 0; col < BOARD_SIZE; col++) {
+            if (board[row][col] === null) {
+                // Try this move
+                board[row][col] = player;
 
-    for (const { row, col } of relevantCells) {
-        if (board[row][col] === null) {
-            // Try this move
-            board[row][col] = player;
-            const winning = checkWin(row, col);
-            board[row][col] = null;
+                // Check all 4 directions for 5-in-a-row
+                const isWinning = checkWin(row, col);
 
-            if (winning) {
-                return { row, col };
+                board[row][col] = null;
+
+                if (isWinning) {
+                    return { row, col };
+                }
             }
         }
     }
-
     return null;
+}
+
+// Scan for 4-in-a-row patterns (need to block/create immediately)
+function scanForFourInRow(player) {
+    const directions = [
+        [0, 1],   // Horizontal
+        [1, 0],   // Vertical
+        [1, 1],   // Diagonal \
+        [1, -1]   // Diagonal /
+    ];
+
+    // Scan entire board
+    for (let row = 0; row < BOARD_SIZE; row++) {
+        for (let col = 0; col < BOARD_SIZE; col++) {
+            if (board[row][col] === player) {
+                // Check each direction
+                for (const [dx, dy] of directions) {
+                    const pattern = getLinePattern(row, col, dx, dy, player);
+
+                    // Check for 4-in-a-row with one or both ends open
+                    if (pattern.count === 4 && pattern.openEnds > 0) {
+                        // Find the blocking/completing position
+                        const blockPos = findBlockingPosition(row, col, dx, dy, player, pattern);
+                        if (blockPos) {
+                            return blockPos;
+                        }
+                    }
+                }
+            }
+        }
+    }
+    return null;
+}
+
+// Scan for open three patterns (3-in-a-row with both ends open)
+function scanForOpenThree(player) {
+    const directions = [
+        [0, 1],   // Horizontal
+        [1, 0],   // Vertical
+        [1, 1],   // Diagonal \
+        [1, -1]   // Diagonal /
+    ];
+
+    let bestMove = null;
+    let maxThreat = 0;
+
+    // Scan entire board
+    for (let row = 0; row < BOARD_SIZE; row++) {
+        for (let col = 0; col < BOARD_SIZE; col++) {
+            if (board[row][col] === player) {
+                // Check each direction
+                for (const [dx, dy] of directions) {
+                    const pattern = getLinePattern(row, col, dx, dy, player);
+
+                    // Open three: 3 pieces with 2 open ends
+                    if (pattern.count === 3 && pattern.openEnds === 2) {
+                        const blockPos = findBlockingPosition(row, col, dx, dy, player, pattern);
+                        if (blockPos) {
+                            // Prioritize based on position quality
+                            board[blockPos.row][blockPos.col] = 'O';
+                            const quality = quickEvaluate(blockPos.row, blockPos.col, 'O');
+                            board[blockPos.row][blockPos.col] = null;
+
+                            if (quality > maxThreat) {
+                                maxThreat = quality;
+                                bestMove = blockPos;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    return bestMove;
+}
+
+// Get line pattern (count consecutive pieces and open ends)
+function getLinePattern(row, col, dx, dy, player) {
+    let count = 1; // Start with current piece
+    let openEnds = 0;
+    let emptyPositions = [];
+
+    // Check positive direction
+    let r = row + dx;
+    let c = col + dy;
+    let consecutiveEmpty = 0;
+
+    for (let i = 0; i < 5; i++) {
+        if (r < 0 || r >= BOARD_SIZE || c < 0 || c >= BOARD_SIZE) break;
+
+        if (board[r][c] === player) {
+            count++;
+            consecutiveEmpty = 0;
+        } else if (board[r][c] === null) {
+            if (consecutiveEmpty === 0) {
+                emptyPositions.push({ row: r, col: c });
+                consecutiveEmpty++;
+                // Check if this creates an open end
+                const nextR = r + dx;
+                const nextC = c + dy;
+                if (nextR >= 0 && nextR < BOARD_SIZE && nextC >= 0 && nextC < BOARD_SIZE) {
+                    if (board[nextR][nextC] === null || board[nextR][nextC] === player) {
+                        openEnds++;
+                    }
+                }
+            }
+            break;
+        } else {
+            break; // Blocked by opponent
+        }
+
+        r += dx;
+        c += dy;
+    }
+
+    // Check negative direction
+    r = row - dx;
+    c = col - dy;
+    consecutiveEmpty = 0;
+
+    for (let i = 0; i < 5; i++) {
+        if (r < 0 || r >= BOARD_SIZE || c < 0 || c >= BOARD_SIZE) break;
+
+        if (board[r][c] === player) {
+            count++;
+            consecutiveEmpty = 0;
+        } else if (board[r][c] === null) {
+            if (consecutiveEmpty === 0) {
+                emptyPositions.push({ row: r, col: c });
+                consecutiveEmpty++;
+                // Check if this creates an open end
+                const nextR = r - dx;
+                const nextC = c - dy;
+                if (nextR >= 0 && nextR < BOARD_SIZE && nextC >= 0 && nextC < BOARD_SIZE) {
+                    if (board[nextR][nextC] === null || board[nextR][nextC] === player) {
+                        openEnds++;
+                    }
+                }
+            }
+            break;
+        } else {
+            break; // Blocked by opponent
+        }
+
+        r -= dx;
+        c -= dy;
+    }
+
+    return { count, openEnds, emptyPositions };
+}
+
+// Find position to block/complete a pattern
+function findBlockingPosition(row, col, dx, dy, player, pattern) {
+    if (pattern.emptyPositions.length === 0) return null;
+
+    // Return first empty position (closest to the line)
+    return pattern.emptyPositions[0];
 }
 
 // Find critical defense moves (including double threats)
