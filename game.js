@@ -10,8 +10,8 @@ const WIN_CONDITION = 5;
 let board = [];
 let currentPlayer = 'X';
 let gameActive = true;
-let gameMode = 'pvp'; // 'pvp' or 'pvc'
-let aiDifficulty = 'medium'; // 'easy', 'medium', 'hard'
+const gameMode = 'pvc'; // Always AI vs Player
+const aiDifficulty = 'hard'; // Always hardest difficulty
 let soundEnabled = true;
 let timerEnabled = false;
 
@@ -35,9 +35,6 @@ const boardElement = document.getElementById('board');
 const statusElement = document.getElementById('status');
 const resetBtn = document.getElementById('resetBtn');
 const startGameBtn = document.getElementById('startGameBtn');
-const gameModeSelect = document.getElementById('gameMode');
-const aiDifficultySelect = document.getElementById('aiDifficulty');
-const aiDifficultyGroup = document.getElementById('aiDifficultyGroup');
 const boardSizeSelect = document.getElementById('boardSize');
 const soundToggle = document.getElementById('soundToggle');
 const timerToggle = document.getElementById('timerToggle');
@@ -789,9 +786,7 @@ function saveGame() {
         gameActive,
         moveHistory,
         currentMoveIndex,
-        BOARD_SIZE,
-        gameMode,
-        aiDifficulty
+        BOARD_SIZE
     };
     localStorage.setItem('caroGame', JSON.stringify(gameState));
 }
@@ -807,14 +802,9 @@ function loadGame() {
             moveHistory = gameState.moveHistory || [];
             currentMoveIndex = gameState.currentMoveIndex || -1;
             BOARD_SIZE = gameState.BOARD_SIZE || 15;
-            gameMode = gameState.gameMode || 'pvp';
-            aiDifficulty = gameState.aiDifficulty || 'medium';
 
             // Update board size select
             boardSizeSelect.value = BOARD_SIZE;
-            gameModeSelect.value = gameMode;
-            aiDifficultySelect.value = aiDifficulty;
-            aiDifficultyGroup.style.display = gameMode === 'pvc' ? 'block' : 'none';
 
             // Recreate board UI
             boardElement.innerHTML = '';
@@ -850,16 +840,10 @@ function loadGame() {
 resetBtn.addEventListener('click', initGame);
 
 startGameBtn.addEventListener('click', () => {
-    gameMode = gameModeSelect.value;
-    aiDifficulty = aiDifficultySelect.value;
     BOARD_SIZE = parseInt(boardSizeSelect.value);
     soundEnabled = soundToggle.checked;
     timerEnabled = timerToggle.checked;
     initGame();
-});
-
-gameModeSelect.addEventListener('change', (e) => {
-    aiDifficultyGroup.style.display = e.target.value === 'pvc' ? 'block' : 'none';
 });
 
 darkModeToggle.addEventListener('click', toggleDarkMode);
@@ -899,8 +883,3 @@ document.addEventListener('keydown', (e) => {
 loadDarkMode();
 loadStats();
 loadGame();
-
-// Show AI difficulty if PvC is selected
-if (gameModeSelect.value === 'pvc') {
-    aiDifficultyGroup.style.display = 'block';
-}
