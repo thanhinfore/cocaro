@@ -248,26 +248,75 @@ function updateStatus() {
 }
 
 // ================================
-// AI LOGIC (SUPER INTELLIGENT - 10X STRONGER)
+// AI LOGIC (GRAND MASTER LEVEL - ULTRA INTELLIGENT)
 // ================================
 
+// Transposition Table với Zobrist Hashing
+let transpositionTable = new Map();
+let zobristTable = [];
+let zobristBlackTurn = 0;
+
+// Killer moves for move ordering
+let killerMoves = [];
+
+// Initialize Zobrist hashing
+function initZobrist() {
+    zobristTable = [];
+    for (let i = 0; i < BOARD_SIZE; i++) {
+        zobristTable[i] = [];
+        for (let j = 0; j < BOARD_SIZE; j++) {
+            zobristTable[i][j] = {
+                'X': Math.floor(Math.random() * 0xFFFFFFFFFFFF),
+                'O': Math.floor(Math.random() * 0xFFFFFFFFFFFF)
+            };
+        }
+    }
+    zobristBlackTurn = Math.floor(Math.random() * 0xFFFFFFFFFFFF);
+}
+
+function getZobristHash(isMaximizing) {
+    let hash = 0;
+    for (let i = 0; i < BOARD_SIZE; i++) {
+        for (let j = 0; j < BOARD_SIZE; j++) {
+            if (board[i][j]) {
+                hash ^= zobristTable[i][j][board[i][j]];
+            }
+        }
+    }
+    if (!isMaximizing) hash ^= zobristBlackTurn;
+    return hash;
+}
+
 function getAIMove() {
+    // Reset transposition table for new move
+    transpositionTable.clear();
+    killerMoves = Array(10).fill(null).map(() => []);
+
+    // Initialize Zobrist if not done
+    if (zobristTable.length === 0) {
+        initZobrist();
+    }
+
     // Check for immediate winning move
     const winMove = findImmediateWin('O');
     if (winMove) return winMove;
 
-    // Check for immediate blocking move
-    const blockMove = findImmediateWin('X');
+    // Check for immediate blocking move (including double threats)
+    const blockMove = findCriticalDefense('X');
     if (blockMove) return blockMove;
 
+    // Check if we can create a winning threat
+    const winThreat = findWinningThreat('O');
+    if (winThreat) return winThreat;
+
     // Opening book for first few moves
-    if (moveHistory.length < 3) {
+    if (moveHistory.length <= 4) {
         const openingMove = getOpeningMove();
         if (openingMove) return openingMove;
     }
 
-    // Use advanced minimax with deeper search
-    return getBestMove(4); // Depth 4 instead of 3
+    // Use iterative deepening with VCF search
+    return getBestMoveIterative();
 }
 
 // Find immediate winning move or blocking move
@@ -290,26 +339,265 @@ function findImmediateWin(player) {
     return null;
 }
 
-// Opening book - optimal first moves
+// Find critical defense moves (including double threats)
+function findCriticalDefense(opponent) {
+    const relevantCells = getRelevantCells();
+    let criticalMoves = [];
+
+    // First, find all threats
+    for (const { row, col } of relevantCells) {
+        if (board[row][col] === null) {
+            board[row][col] = opponent;
+
+            // Check if this creates a winning position
+            if (checkWin(row, col)) {
+                board[row][col] = null;
+                return { row, col }; // Must block immediately
+            }
+
+            // Check if this creates an open four (unstoppable threat)
+            const threatLevel = evaluateThreats(row, col, opponent);
+            if (threatLevel >= 100000) {
+                criticalMoves.push({ row, col, threat: threatLevel });
+            }
+
+            board[row][col] = null;
+        }
+    }
+
+    // Check for double threats (opponent has two ways to win)
+    if (criticalMoves.length >= 2) {
+        // Opponent can create double threat - we must prevent it
+        // Find moves that block multiple threats
+        for (const { row, col } of relevantCells) {
+            if (board[row][col] === null) {
+                board[row][col] = 'O';
+                let blockedThreats = 0;
+
+                for (const threat of criticalMoves) {
+                    board[threat.row][threat.col] = opponent;
+                    if (!checkWin(threat.row, threat.col)) {
+                        blockedThreats++;
+                    }
+                    board[threat.row][threat.col] = null;
+                }
+
+                board[row][col] = null;
+
+                if (blockedThreats >= 2) {
+                    return { row, col }; // This move blocks multiple threats
+                }
+            }
+        }
+
+        // If no move blocks multiple threats, block the strongest one
+        if (criticalMoves.length > 0) {
+            criticalMoves.sort((a, b) => b.threat - a.threat);
+            return criticalMoves[0];
+        }
+    } else if (criticalMoves.length === 1) {
+        return criticalMoves[0];
+    }
+
+    return null;
+}
+
+// Find moves that create winning threats
+function findWinningThreat(player) {
+    const relevantCells = getRelevantCells();
+    let bestThreat = null;
+    let bestScore = 0;
+
+    for (const { row, col } of relevantCells) {
+        if (board[row][col] === null) {
+            board[row][col] = player;
+
+            // Check if this creates multiple threats (double attack)
+            const threats = countThreats(player);
+
+            // Check if this creates an open four
+            const threatLevel = evaluateThreats(row, col, player);
+
+            board[row][col] = null;
+
+            // If we create 2+ open threes or 1+ open four, it's a winning threat
+            if (threats.openThrees >= 2 || threats.openFours >= 1) {
+                const score = threats.openFours * 100000 + threats.openThrees * 10000;
+                if (score > bestScore) {
+                    bestScore = score;
+                    bestThreat = { row, col };
+                }
+            }
+        }
+    }
+
+    return bestThreat;
+}
+
+// Count threats on the board
+function countThreats(player) {
+    let openThrees = 0;
+    let openFours = 0;
+    let semiOpenThrees = 0;
+
+    for (let row = 0; row < BOARD_SIZE; row++) {
+        for (let col = 0; col < BOARD_SIZE; col++) {
+            if (board[row][col] === player) {
+                const patterns = analyzePatterns(row, col, player);
+                openThrees += patterns.openThrees;
+                openFours += patterns.openFours;
+                semiOpenThrees += patterns.semiOpenThrees;
+            }
+        }
+    }
+
+    return { openThrees: Math.floor(openThrees / 3), openFours: Math.floor(openFours / 4), semiOpenThrees: Math.floor(semiOpenThrees / 3) };
+}
+
+// Analyze patterns around a position
+function analyzePatterns(row, col, player) {
+    const directions = [[0, 1], [1, 0], [1, 1], [1, -1]];
+    let openThrees = 0;
+    let openFours = 0;
+    let semiOpenThrees = 0;
+
+    for (const [dx, dy] of directions) {
+        let count = 1;
+        let openEnds = 0;
+        let spaces = 0;
+
+        // Check positive direction
+        let r = row + dx;
+        let c = col + dy;
+        let hasSpace = false;
+
+        for (let i = 0; i < 5; i++) {
+            if (r < 0 || r >= BOARD_SIZE || c < 0 || c >= BOARD_SIZE) break;
+
+            if (board[r][c] === player) {
+                count++;
+            } else if (board[r][c] === null) {
+                if (i === 0) openEnds++;
+                if (!hasSpace && count < 4) {
+                    spaces++;
+                    hasSpace = true;
+                } else {
+                    break;
+                }
+            } else {
+                break;
+            }
+
+            r += dx;
+            c += dy;
+        }
+
+        // Check negative direction
+        r = row - dx;
+        c = col - dy;
+        hasSpace = false;
+
+        for (let i = 0; i < 5; i++) {
+            if (r < 0 || r >= BOARD_SIZE || c < 0 || c >= BOARD_SIZE) break;
+
+            if (board[r][c] === player) {
+                count++;
+            } else if (board[r][c] === null) {
+                if (i === 0) openEnds++;
+                if (!hasSpace && count < 4) {
+                    spaces++;
+                    hasSpace = true;
+                } else {
+                    break;
+                }
+            } else {
+                break;
+            }
+
+            r -= dx;
+            c -= dy;
+        }
+
+        // Classify pattern
+        if (count === 4 && openEnds >= 1) openFours++;
+        else if (count === 3 && openEnds === 2) openThrees++;
+        else if (count === 3 && openEnds === 1) semiOpenThrees++;
+    }
+
+    return { openThrees, openFours, semiOpenThrees };
+}
+
+// Evaluate threats at a position
+function evaluateThreats(row, col, player) {
+    const patterns = analyzePatterns(row, col, player);
+    return patterns.openFours * 100000 + patterns.openThrees * 50000 + patterns.semiOpenThrees * 5000;
+}
+
+// Opening book - extensive optimal first moves
 function getOpeningMove() {
     const center = Math.floor(BOARD_SIZE / 2);
 
-    // First move: play center
+    // First move: always play center (strongest opening)
     if (moveHistory.length === 0) {
         return { row: center, col: center };
     }
 
-    // Second move (AI's first move): play near opponent
+    // AI's first move (moveHistory.length === 1)
     if (moveHistory.length === 1) {
         const firstMove = moveHistory[0];
-        const distances = [
-            { row: firstMove.row - 1, col: firstMove.col - 1 },
-            { row: firstMove.row - 1, col: firstMove.col + 1 },
-            { row: firstMove.row + 1, col: firstMove.col - 1 },
-            { row: firstMove.row + 1, col: firstMove.col + 1 },
+
+        // If opponent played center, play adjacent diagonal
+        if (firstMove.row === center && firstMove.col === center) {
+            const diagonals = [
+                { row: center - 1, col: center - 1 },
+                { row: center - 1, col: center + 1 },
+                { row: center + 1, col: center - 1 },
+                { row: center + 1, col: center + 1 }
+            ];
+            return diagonals[Math.floor(Math.random() * diagonals.length)];
+        }
+
+        // If opponent played off-center, play center
+        if (board[center][center] === null) {
+            return { row: center, col: center };
+        }
+    }
+
+    // Human's second move (moveHistory.length === 2)
+    if (moveHistory.length === 2) {
+        const aiMove = moveHistory[1];
+
+        // Find aggressive position near AI's piece
+        const directions = [
+            { row: aiMove.row - 1, col: aiMove.col },
+            { row: aiMove.row + 1, col: aiMove.col },
+            { row: aiMove.row, col: aiMove.col - 1 },
+            { row: aiMove.row, col: aiMove.col + 1 },
+            { row: aiMove.row - 1, col: aiMove.col - 1 },
+            { row: aiMove.row - 1, col: aiMove.col + 1 },
+            { row: aiMove.row + 1, col: aiMove.col - 1 },
+            { row: aiMove.row + 1, col: aiMove.col + 1 },
         ];
 
-        for (const pos of distances) {
+        // Prefer positions that create a line
+        for (const pos of directions) {
+            if (pos.row >= 0 && pos.row < BOARD_SIZE &&
+                pos.col >= 0 && pos.col < BOARD_SIZE &&
+                board[pos.row][pos.col] === null) {
+
+                // Check if this creates a potential line
+                board[pos.row][pos.col] = 'O';
+                const score = quickEvaluate(pos.row, pos.col, 'O');
+                board[pos.row][pos.col] = null;
+
+                if (score > 500) {
+                    return pos;
+                }
+            }
+        }
+
+        // Fallback to any valid position
+        for (const pos of directions) {
             if (pos.row >= 0 && pos.row < BOARD_SIZE &&
                 pos.col >= 0 && pos.col < BOARD_SIZE &&
                 board[pos.row][pos.col] === null) {
@@ -318,9 +606,22 @@ function getOpeningMove() {
         }
     }
 
-    // Third move: find strategic position
-    if (moveHistory.length === 2) {
+    // AI's second move (moveHistory.length === 3 or 4)
+    if (moveHistory.length === 3 || moveHistory.length === 4) {
+        // Look for strong attacking positions
         const strategicMoves = getStrategicMoves();
+
+        // Prioritize moves that create multiple threats
+        for (const move of strategicMoves.slice(0, 5)) {
+            board[move.row][move.col] = 'O';
+            const threats = countThreats('O');
+            board[move.row][move.col] = null;
+
+            if (threats.openThrees >= 1 || threats.semiOpenThrees >= 2) {
+                return move;
+            }
+        }
+
         if (strategicMoves.length > 0) {
             return strategicMoves[0];
         }
@@ -365,36 +666,153 @@ function getStrategicMoves() {
     return moves;
 }
 
-function getBestMove(depth) {
-    let bestScore = -Infinity;
+// Iterative deepening - progressively deeper search
+function getBestMoveIterative() {
     let bestMove = null;
+    const maxDepth = 6;
+    const timeLimit = 4000; // 4 seconds max
+    const startTime = Date.now();
 
-    // Get relevant cells and order them by priority
+    // Get relevant cells
     const relevantCells = getRelevantCells();
-    const orderedMoves = orderMoves(relevantCells);
+    let orderedMoves = orderMoves(relevantCells);
 
-    for (const { row, col } of orderedMoves) {
-        if (board[row][col] === null) {
-            board[row][col] = 'O';
-            const score = minimax(depth - 1, -Infinity, Infinity, false);
-            board[row][col] = null;
+    // Try VCF search first (threat space search)
+    const vcfMove = searchVCF('O', 10);
+    if (vcfMove) return vcfMove;
 
-            if (score > bestScore) {
-                bestScore = score;
-                bestMove = { row, col };
+    // Iterative deepening from depth 1 to maxDepth
+    for (let depth = 1; depth <= maxDepth; depth++) {
+        let bestScore = -Infinity;
+        let currentBestMove = null;
+
+        // Use previous iteration's best move ordering
+        if (bestMove) {
+            orderedMoves = orderedMoves.filter(m => m.row !== bestMove.row || m.col !== bestMove.col);
+            orderedMoves.unshift(bestMove);
+        }
+
+        for (const { row, col } of orderedMoves) {
+            // Check time limit
+            if (Date.now() - startTime > timeLimit) {
+                return bestMove || orderedMoves[0];
             }
+
+            if (board[row][col] === null) {
+                board[row][col] = 'O';
+                const score = minimax(depth - 1, -Infinity, Infinity, false, depth);
+                board[row][col] = null;
+
+                if (score > bestScore) {
+                    bestScore = score;
+                    currentBestMove = { row, col };
+                }
+
+                // If we found a winning move, return immediately
+                if (bestScore >= 999000) {
+                    return currentBestMove;
+                }
+            }
+        }
+
+        if (currentBestMove) {
+            bestMove = currentBestMove;
         }
     }
 
-    return bestMove || (orderedMoves[0] ? orderedMoves[0] : null);
+    return bestMove || orderedMoves[0];
 }
 
-// Order moves for better alpha-beta pruning
-function orderMoves(moves) {
+// VCF (Victory by Continuous Fours) Search
+function searchVCF(player, maxDepth) {
+    if (maxDepth <= 0) return null;
+
+    const relevantCells = getRelevantCells();
+
+    // Try all attacking moves
+    for (const { row, col } of relevantCells) {
+        if (board[row][col] === null) {
+            board[row][col] = player;
+
+            // Check if this creates a winning threat
+            const threats = analyzePatterns(row, col, player);
+
+            if (threats.openFours >= 1) {
+                // We created an open four - check if opponent can defend
+                const opponent = player === 'O' ? 'X' : 'O';
+                board[row][col] = null;
+
+                // Find opponent's defense moves
+                const defenses = [];
+                for (const { row: dr, col: dc } of relevantCells) {
+                    if (board[dr][dc] === null) {
+                        board[dr][dc] = opponent;
+                        board[row][col] = player;
+
+                        const stillThreat = analyzePatterns(row, col, player);
+                        if (stillThreat.openFours === 0) {
+                            defenses.push({ row: dr, col: dc });
+                        }
+
+                        board[row][col] = null;
+                        board[dr][dc] = null;
+                    }
+                }
+
+                // If there's only one defense, continue VCF search
+                if (defenses.length === 1) {
+                    board[row][col] = player;
+                    board[defenses[0].row][defenses[0].col] = opponent;
+
+                    const nextVCF = searchVCF(player, maxDepth - 1);
+
+                    board[defenses[0].row][defenses[0].col] = null;
+                    board[row][col] = null;
+
+                    if (nextVCF || maxDepth > 8) {
+                        return { row, col };
+                    }
+                } else if (defenses.length === 0) {
+                    // No defense possible - winning move!
+                    board[row][col] = null;
+                    return { row, col };
+                }
+
+                board[row][col] = player;
+            }
+
+            board[row][col] = null;
+        }
+    }
+
+    return null;
+}
+
+// Order moves for better alpha-beta pruning (with killer moves)
+function orderMoves(moves, depth = 0) {
     const scored = moves.map(move => {
+        let score = 0;
+
+        // Check killer moves first (moves that caused cutoffs in other branches)
+        if (killerMoves[depth]) {
+            for (const killer of killerMoves[depth]) {
+                if (killer && killer.row === move.row && killer.col === move.col) {
+                    score += 50000; // High priority for killer moves
+                    break;
+                }
+            }
+        }
+
         // Simulate move and get quick evaluation
         board[move.row][move.col] = 'O';
-        const score = quickEvaluate(move.row, move.col, 'O');
+        score += quickEvaluate(move.row, move.col, 'O');
+
+        // Check threats created
+        const threats = analyzePatterns(move.row, move.col, 'O');
+        score += threats.openFours * 100000;
+        score += threats.openThrees * 10000;
+        score += threats.semiOpenThrees * 1000;
+
         board[move.row][move.col] = null;
 
         return { ...move, score };
@@ -459,40 +877,94 @@ function quickEvaluate(row, col, player) {
     return score;
 }
 
-function minimax(depth, alpha, beta, isMaximizing) {
+function minimax(depth, alpha, beta, isMaximizing, originalDepth) {
+    // Check transposition table
+    const hash = getZobristHash(isMaximizing);
+    const cached = transpositionTable.get(hash);
+
+    if (cached && cached.depth >= depth) {
+        if (cached.flag === 'exact') return cached.score;
+        if (cached.flag === 'lowerbound') alpha = Math.max(alpha, cached.score);
+        else if (cached.flag === 'upperbound') beta = Math.min(beta, cached.score);
+
+        if (alpha >= beta) return cached.score;
+    }
+
     // Check terminal states
     const winner = checkWinner();
-    if (winner === 'O') return 1000;
-    if (winner === 'X') return -1000;
+    if (winner === 'O') return 1000000 - (originalDepth - depth); // Prefer faster wins
+    if (winner === 'X') return -1000000 + (originalDepth - depth); // Prefer slower losses
     if (isBoardFull() || depth === 0) return evaluateBoard();
 
     const relevantCells = getRelevantCells();
+    const depthIndex = originalDepth - depth;
+
+    // Order moves for better pruning
+    const orderedMoves = orderMoves(relevantCells, depthIndex).slice(0, Math.max(20, 30 - depth * 2));
 
     if (isMaximizing) {
         let maxScore = -Infinity;
-        for (const { row, col } of relevantCells) {
+        let bestMove = null;
+
+        for (const { row, col } of orderedMoves) {
             if (board[row][col] === null) {
                 board[row][col] = 'O';
-                const score = minimax(depth - 1, alpha, beta, false);
+                const score = minimax(depth - 1, alpha, beta, false, originalDepth);
                 board[row][col] = null;
-                maxScore = Math.max(maxScore, score);
+
+                if (score > maxScore) {
+                    maxScore = score;
+                    bestMove = { row, col };
+                }
+
                 alpha = Math.max(alpha, score);
-                if (beta <= alpha) break;
+
+                if (beta <= alpha) {
+                    // Beta cutoff - store killer move
+                    if (!killerMoves[depthIndex]) killerMoves[depthIndex] = [];
+                    killerMoves[depthIndex].unshift(bestMove);
+                    if (killerMoves[depthIndex].length > 2) killerMoves[depthIndex].pop();
+                    break;
+                }
             }
         }
+
+        // Store in transposition table
+        const flag = maxScore <= alpha ? 'upperbound' : maxScore >= beta ? 'lowerbound' : 'exact';
+        transpositionTable.set(hash, { score: maxScore, depth, flag });
+
         return maxScore;
     } else {
         let minScore = Infinity;
-        for (const { row, col } of relevantCells) {
+        let bestMove = null;
+
+        for (const { row, col } of orderedMoves) {
             if (board[row][col] === null) {
                 board[row][col] = 'X';
-                const score = minimax(depth - 1, alpha, beta, true);
+                const score = minimax(depth - 1, alpha, beta, true, originalDepth);
                 board[row][col] = null;
-                minScore = Math.min(minScore, score);
+
+                if (score < minScore) {
+                    minScore = score;
+                    bestMove = { row, col };
+                }
+
                 beta = Math.min(beta, score);
-                if (beta <= alpha) break;
+
+                if (beta <= alpha) {
+                    // Alpha cutoff - store killer move
+                    if (!killerMoves[depthIndex]) killerMoves[depthIndex] = [];
+                    killerMoves[depthIndex].unshift(bestMove);
+                    if (killerMoves[depthIndex].length > 2) killerMoves[depthIndex].pop();
+                    break;
+                }
             }
         }
+
+        // Store in transposition table
+        const flag = minScore >= beta ? 'lowerbound' : minScore <= alpha ? 'upperbound' : 'exact';
+        transpositionTable.set(hash, { score: minScore, depth, flag });
+
         return minScore;
     }
 }
@@ -815,10 +1287,34 @@ function showHint() {
         return;
     }
 
-    // Use AI logic to find best move
-    const originalPlayer = currentPlayer;
-    currentPlayer = originalPlayer; // Keep current player
-    hintMove = getBestMove(2);
+    // Use simplified AI logic to find best move for player X
+    // Check for immediate winning move
+    hintMove = findImmediateWin('X');
+
+    if (!hintMove) {
+        // Check for immediate blocking move
+        hintMove = findImmediateWin('O');
+    }
+
+    if (!hintMove) {
+        // Find best strategic move
+        const relevantCells = getRelevantCells();
+        const orderedMoves = orderMoves(relevantCells).slice(0, 10);
+
+        let bestScore = -Infinity;
+        for (const { row, col } of orderedMoves) {
+            if (board[row][col] === null) {
+                board[row][col] = 'X';
+                const score = quickEvaluate(row, col, 'X') + evaluateThreats(row, col, 'X');
+                board[row][col] = null;
+
+                if (score > bestScore) {
+                    bestScore = score;
+                    hintMove = { row, col };
+                }
+            }
+        }
+    }
 
     if (hintMove) {
         const index = hintMove.row * BOARD_SIZE + hintMove.col;
