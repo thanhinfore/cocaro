@@ -30,6 +30,34 @@ let stats = {
 let timerInterval = null;
 let timerSeconds = 0;
 
+// ================================
+// AI LEARNING SYSTEM
+// ================================
+
+// Experience Database - lưu patterns và kết quả
+let experienceDB = {
+    patterns: new Map(), // pattern hash -> {wins, losses, draws, avgScore}
+    moveQuality: new Map(), // position hash -> quality score
+    openingBook: new Map(), // opening sequence -> win rate
+    adaptiveWeights: {
+        openFour: 100000,
+        openThree: 50000,
+        semiOpenThree: 5000,
+        openTwo: 1000,
+        centerControl: 5
+    },
+    gamesPlayed: 0,
+    totalLearnings: 0
+};
+
+// Current game learning data
+let currentGameData = {
+    positions: [],
+    evaluations: [],
+    moves: [],
+    result: null
+};
+
 // DOM Elements
 const boardElement = document.getElementById('board');
 const statusElement = document.getElementById('status');
@@ -72,6 +100,15 @@ function initGame() {
     currentMoveIndex = -1;
     boardElement.innerHTML = '';
     particles = [];
+
+    // Reset learning data for new game
+    currentGameData = {
+        positions: [],
+        evaluations: [],
+        moves: [],
+        result: null
+    };
+
     updateStatus();
     createBoard();
     updateHistoryUI();
@@ -132,6 +169,15 @@ function makeMove(row, col, skipHistory = false) {
     cell.classList.add(currentPlayer.toLowerCase());
     cell.disabled = true;
 
+    // Track position for learning (AI moves only)
+    if (currentPlayer === 'O' && !skipHistory) {
+        const posHash = getBoardHash();
+        const evaluation = evaluateBoard();
+        currentGameData.positions.push(posHash);
+        currentGameData.evaluations.push(evaluation);
+        currentGameData.moves.push({ row, col, player: currentPlayer });
+    }
+
     // Add to history
     if (!skipHistory) {
         // Remove future moves if we're not at the end
@@ -159,6 +205,10 @@ function makeMove(row, col, skipHistory = false) {
         playSound('win');
         stopTimer();
         createParticles();
+
+        // Learn from game result
+        learnFromGame(winner);
+
         saveGame();
         return;
     }
@@ -170,6 +220,10 @@ function makeMove(row, col, skipHistory = false) {
         updateStats('draw');
         playSound('draw');
         stopTimer();
+
+        // Learn from draw
+        learnFromGame('draw');
+
         saveGame();
         return;
     }
@@ -308,6 +362,15 @@ function getAIMove() {
     // Check if we can create a winning threat
     const winThreat = findWinningThreat('O');
     if (winThreat) return winThreat;
+
+    // Try learned opening first (if available)
+    if (moveHistory.length > 0 && moveHistory.length <= 5) {
+        const learnedMove = getLearnedOpening();
+        if (learnedMove) {
+            console.log(`✓ Using learned opening (win rate > 50%)`);
+            return learnedMove;
+        }
+    }
 
     // Opening book for first few moves
     if (moveHistory.length <= 4) {
@@ -788,7 +851,7 @@ function searchVCF(player, maxDepth) {
     return null;
 }
 
-// Order moves for better alpha-beta pruning (with killer moves)
+// Order moves for better alpha-beta pruning (with killer moves + learning)
 function orderMoves(moves, depth = 0) {
     const scored = moves.map(move => {
         let score = 0;
@@ -805,13 +868,20 @@ function orderMoves(moves, depth = 0) {
 
         // Simulate move and get quick evaluation
         board[move.row][move.col] = 'O';
+
+        // Add learned move quality (from experience)
+        const posHash = getBoardHash();
+        const learnedQuality = getLearnedMoveQuality(posHash);
+        score += learnedQuality;
+
+        // Base evaluation
         score += quickEvaluate(move.row, move.col, 'O');
 
-        // Check threats created
+        // Check threats created (using adaptive weights)
         const threats = analyzePatterns(move.row, move.col, 'O');
-        score += threats.openFours * 100000;
-        score += threats.openThrees * 10000;
-        score += threats.semiOpenThrees * 1000;
+        score += threats.openFours * experienceDB.adaptiveWeights.openFour / 100;
+        score += threats.openThrees * experienceDB.adaptiveWeights.openThree / 100;
+        score += threats.semiOpenThrees * experienceDB.adaptiveWeights.semiOpenThree / 10;
 
         board[move.row][move.col] = null;
 
@@ -1200,6 +1270,230 @@ function calculateThreatLevel(row, col) {
     }
 
     return maxThreat;
+}
+
+// ================================
+// AI LEARNING SYSTEM - EXPERIENCE & ADAPTATION
+// ================================
+
+// Generate hash for current board state
+function getBoardHash() {
+    let hash = '';
+    for (let row = 0; row < BOARD_SIZE; row++) {
+        for (let col = 0; col < BOARD_SIZE; col++) {
+            hash += board[row][col] === null ? '0' : (board[row][col] === 'X' ? '1' : '2');
+        }
+    }
+    return hash;
+}
+
+// Learn from completed game
+function learnFromGame(result) {
+    currentGameData.result = result;
+    experienceDB.gamesPlayed++;
+
+    const isAIWin = result === 'O';
+    const isAILoss = result === 'X';
+    const isDraw = result === 'draw';
+
+    // Update move quality based on result
+    for (let i = 0; i < currentGameData.positions.length; i++) {
+        const posHash = currentGameData.positions[i];
+        const evaluation = currentGameData.evaluations[i];
+
+        // Calculate reward based on result and move index
+        let reward = 0;
+        if (isAIWin) {
+            // Winning moves get positive reward (later moves get more credit)
+            reward = 1.0 * (i + 1) / currentGameData.positions.length;
+        } else if (isAILoss) {
+            // Losing moves get negative reward (early mistakes penalized more)
+            reward = -1.0 * (currentGameData.positions.length - i) / currentGameData.positions.length;
+        } else {
+            // Draw gets small positive reward
+            reward = 0.1;
+        }
+
+        // Update move quality in database
+        if (!experienceDB.moveQuality.has(posHash)) {
+            experienceDB.moveQuality.set(posHash, {
+                quality: reward,
+                count: 1,
+                avgEval: evaluation,
+                wins: isAIWin ? 1 : 0,
+                losses: isAILoss ? 1 : 0,
+                draws: isDraw ? 1 : 0
+            });
+        } else {
+            const data = experienceDB.moveQuality.get(posHash);
+            data.count++;
+            data.quality = (data.quality * (data.count - 1) + reward) / data.count;
+            data.avgEval = (data.avgEval * (data.count - 1) + evaluation) / data.count;
+            if (isAIWin) data.wins++;
+            if (isAILoss) data.losses++;
+            if (isDraw) data.draws++;
+        }
+    }
+
+    // Learn opening patterns (first 5 moves)
+    if (currentGameData.moves.length >= 2) {
+        const opening = currentGameData.moves.slice(0, Math.min(5, currentGameData.moves.length))
+            .map(m => `${m.row},${m.col}`)
+            .join('|');
+
+        if (!experienceDB.openingBook.has(opening)) {
+            experienceDB.openingBook.set(opening, {
+                wins: isAIWin ? 1 : 0,
+                losses: isAILoss ? 1 : 0,
+                draws: isDraw ? 1 : 0,
+                totalGames: 1
+            });
+        } else {
+            const data = experienceDB.openingBook.get(opening);
+            if (isAIWin) data.wins++;
+            if (isAILoss) data.losses++;
+            if (isDraw) data.draws++;
+            data.totalGames++;
+        }
+    }
+
+    // Adaptive weight adjustment based on game outcome
+    if (isAILoss && currentGameData.evaluations.length > 0) {
+        // If we lost, slightly adjust weights to be more defensive
+        experienceDB.adaptiveWeights.openThree *= 1.05;
+        experienceDB.adaptiveWeights.semiOpenThree *= 1.03;
+    } else if (isAIWin && currentGameData.evaluations.length > 0) {
+        // If we won, slightly boost offensive patterns
+        experienceDB.adaptiveWeights.openFour *= 1.01;
+    }
+
+    experienceDB.totalLearnings++;
+
+    // Save learning data every 5 games
+    if (experienceDB.gamesPlayed % 5 === 0) {
+        saveLearningData();
+    }
+}
+
+// Get learned move quality for a position
+function getLearnedMoveQuality(posHash) {
+    const data = experienceDB.moveQuality.get(posHash);
+    if (!data) return 0;
+
+    // Calculate win rate
+    const total = data.wins + data.losses + data.draws;
+    if (total === 0) return 0;
+
+    const winRate = (data.wins + data.draws * 0.5) / total;
+
+    // Combine quality score with win rate
+    return data.quality * 1000 + winRate * 5000;
+}
+
+// Check if opening is in learned book
+function getLearnedOpening() {
+    if (moveHistory.length === 0 || moveHistory.length > 5) return null;
+
+    const currentSeq = moveHistory
+        .map(m => `${m.row},${m.col}`)
+        .join('|');
+
+    // Find best continuation from learned openings
+    let bestContinuation = null;
+    let bestWinRate = -1;
+
+    for (const [opening, data] of experienceDB.openingBook) {
+        if (opening.startsWith(currentSeq) && opening.length > currentSeq.length) {
+            const total = data.totalGames;
+            if (total < 3) continue; // Need at least 3 games
+
+            const winRate = (data.wins + data.draws * 0.5) / total;
+
+            if (winRate > bestWinRate && winRate > 0.5) {
+                bestWinRate = winRate;
+
+                // Extract next move from opening
+                const remainingMoves = opening.substring(currentSeq.length + 1);
+                const nextMove = remainingMoves.split('|')[0];
+                if (nextMove) {
+                    const [row, col] = nextMove.split(',').map(Number);
+                    if (board[row] && board[row][col] === null) {
+                        bestContinuation = { row, col };
+                    }
+                }
+            }
+        }
+    }
+
+    return bestContinuation;
+}
+
+// Enhanced evaluation using learned patterns
+function evaluateBoardWithLearning() {
+    const baseEval = evaluateBoard();
+    const posHash = getBoardHash();
+    const learnedQuality = getLearnedMoveQuality(posHash);
+
+    // Combine base evaluation with learned quality
+    return baseEval + learnedQuality * 0.3; // 30% weight to learned data
+}
+
+// Save learning data to localStorage
+function saveLearningData() {
+    try {
+        const learningData = {
+            moveQuality: Array.from(experienceDB.moveQuality.entries()),
+            openingBook: Array.from(experienceDB.openingBook.entries()),
+            adaptiveWeights: experienceDB.adaptiveWeights,
+            gamesPlayed: experienceDB.gamesPlayed,
+            totalLearnings: experienceDB.totalLearnings
+        };
+
+        localStorage.setItem('caroAILearning', JSON.stringify(learningData));
+        console.log(`✓ AI Learning saved: ${experienceDB.gamesPlayed} games, ${experienceDB.moveQuality.size} positions learned`);
+    } catch (e) {
+        console.error('Failed to save learning data:', e);
+    }
+}
+
+// Load learning data from localStorage
+function loadLearningData() {
+    try {
+        const saved = localStorage.getItem('caroAILearning');
+        if (saved) {
+            const learningData = JSON.parse(saved);
+
+            experienceDB.moveQuality = new Map(learningData.moveQuality || []);
+            experienceDB.openingBook = new Map(learningData.openingBook || []);
+            experienceDB.adaptiveWeights = learningData.adaptiveWeights || experienceDB.adaptiveWeights;
+            experienceDB.gamesPlayed = learningData.gamesPlayed || 0;
+            experienceDB.totalLearnings = learningData.totalLearnings || 0;
+
+            console.log(`✓ AI Learning loaded: ${experienceDB.gamesPlayed} games, ${experienceDB.moveQuality.size} positions in database`);
+        }
+    } catch (e) {
+        console.error('Failed to load learning data:', e);
+    }
+}
+
+// Reset learning data (for testing)
+function resetLearning() {
+    experienceDB = {
+        patterns: new Map(),
+        moveQuality: new Map(),
+        openingBook: new Map(),
+        adaptiveWeights: {
+            openFour: 100000,
+            openThree: 50000,
+            semiOpenThree: 5000,
+            openTwo: 1000,
+            centerControl: 5
+        },
+        gamesPlayed: 0,
+        totalLearnings: 0
+    };
+    localStorage.removeItem('caroAILearning');
+    console.log('✓ AI Learning data reset');
 }
 
 // ================================
@@ -1657,4 +1951,5 @@ document.addEventListener('keydown', (e) => {
 
 loadDarkMode();
 loadStats();
+loadLearningData(); // Load AI learning experience
 loadGame();
