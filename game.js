@@ -1574,22 +1574,26 @@ function checkWinner() {
 }
 
 function evaluateBoard() {
-    let score = 0;
+    let aiScore = 0;
+    let opponentScore = 0;
 
-    // Evaluate all possible lines
+    // Evaluate all positions using pattern recognition
     for (let row = 0; row < BOARD_SIZE; row++) {
         for (let col = 0; col < BOARD_SIZE; col++) {
-            if (board[row][col] !== null) {
-                score += evaluatePosition(row, col);
+            if (board[row][col] === 'O') {
+                aiScore += evaluatePosition(row, col, 'O');
+            } else if (board[row][col] === 'X') {
+                opponentScore += evaluatePosition(row, col, 'X');
             }
         }
     }
 
-    return score;
+    // CRITICAL: Defense is MORE important than offense in Gomoku
+    // Multiply opponent threats by 1.2 to prioritize blocking
+    return aiScore - (opponentScore * 1.2);
 }
 
-function evaluatePosition(row, col) {
-    const player = board[row][col];
+function evaluatePosition(row, col, player) {
     const directions = [
         [0, 1],   // Horizontal
         [1, 0],   // Vertical
@@ -1597,97 +1601,40 @@ function evaluatePosition(row, col) {
         [1, -1]   // Diagonal /
     ];
 
-    let score = 0;
+    let totalScore = 0;
 
     for (const [dx, dy] of directions) {
-        let count = 1;
-        let openEnds = 0;
-        let spaces = 0; // Count empty spaces within pattern
+        // Get line extending from this position
+        const line = [];
 
-        // Check positive direction
-        let r = row + dx;
-        let c = col + dy;
-        let consecutiveEmpty = 0;
-
-        for (let i = 0; i < 5; i++) {
-            if (r < 0 || r >= BOARD_SIZE || c < 0 || c >= BOARD_SIZE) break;
-
-            if (board[r][c] === player) {
-                count++;
-                consecutiveEmpty = 0;
-            } else if (board[r][c] === null) {
-                consecutiveEmpty++;
-                if (consecutiveEmpty === 1) {
-                    openEnds++;
-                    spaces++;
-                }
-                if (i === 0) openEnds++;
-            } else {
-                break; // Blocked by opponent
+        // Go back 5 positions
+        for (let i = -5; i <= 5; i++) {
+            const r = row + dx * i;
+            const c = col + dy * i;
+            if (r >= 0 && r < BOARD_SIZE && c >= 0 && c < BOARD_SIZE) {
+                line.push(board[r][c]);
             }
-
-            r += dx;
-            c += dy;
         }
 
-        // Check negative direction
-        r = row - dx;
-        c = col - dy;
-        consecutiveEmpty = 0;
+        // Detect all patterns in this line
+        const patterns = detectPatternsInLine(line, player);
 
-        for (let i = 0; i < 5; i++) {
-            if (r < 0 || r >= BOARD_SIZE || c < 0 || c >= BOARD_SIZE) break;
-
-            if (board[r][c] === player) {
-                count++;
-                consecutiveEmpty = 0;
-            } else if (board[r][c] === null) {
-                consecutiveEmpty++;
-                if (consecutiveEmpty === 1) {
-                    openEnds++;
-                    spaces++;
-                }
-                if (i === 0) openEnds++;
-            } else {
-                break; // Blocked by opponent
-            }
-
-            r -= dx;
-            c -= dy;
+        // Sum up pattern scores
+        for (const pattern of patterns) {
+            totalScore += pattern.score;
         }
-
-        // Advanced scoring based on patterns
-        let lineScore = 0;
-
-        if (count >= 5) {
-            lineScore = 1000000; // Win
-        } else if (count === 4) {
-            if (openEnds >= 1) lineScore = 100000; // Four with opening - very dangerous
-            else lineScore = 500; // Four blocked both ends
-        } else if (count === 3) {
-            if (openEnds === 2) lineScore = 50000; // Open three - very strong
-            else if (openEnds === 1) lineScore = 5000; // Semi-open three
-            else lineScore = 100; // Blocked three
-        } else if (count === 2) {
-            if (openEnds === 2 && spaces === 1) lineScore = 2000; // Split two with space
-            else if (openEnds === 2) lineScore = 1000; // Open two
-            else if (openEnds === 1) lineScore = 200; // Semi-open two
-            else lineScore = 50; // Blocked two
-        } else if (count === 1) {
-            if (openEnds === 2) lineScore = 100; // Single with openings
-            else if (openEnds === 1) lineScore = 10;
-        }
-
-        score += player === 'O' ? lineScore : -lineScore;
     }
 
-    // Bonus for center control
+    // Avoid double counting (patterns overlap)
+    totalScore /= 4;
+
+    // Center control bonus
     const center = Math.floor(BOARD_SIZE / 2);
     const distFromCenter = Math.abs(row - center) + Math.abs(col - center);
-    const centerBonus = (BOARD_SIZE - distFromCenter) * 5;
-    score += player === 'O' ? centerBonus : -centerBonus;
+    const centerBonus = (BOARD_SIZE - distFromCenter) * 10;
+    totalScore += centerBonus;
 
-    return score;
+    return totalScore;
 }
 
 function getRelevantCells() {
