@@ -248,42 +248,132 @@ function updateStatus() {
 }
 
 // ================================
-// AI LOGIC (MINIMAX WITH ALPHA-BETA PRUNING)
+// AI LOGIC (SUPER INTELLIGENT - 10X STRONGER)
 // ================================
 
 function getAIMove() {
-    if (aiDifficulty === 'easy') {
-        return getRandomMove();
-    } else if (aiDifficulty === 'medium') {
-        // 50% random, 50% smart
-        return Math.random() < 0.5 ? getRandomMove() : getBestMove(2);
-    } else {
-        // Hard: Use full minimax
-        return getBestMove(3);
+    // Check for immediate winning move
+    const winMove = findImmediateWin('O');
+    if (winMove) return winMove;
+
+    // Check for immediate blocking move
+    const blockMove = findImmediateWin('X');
+    if (blockMove) return blockMove;
+
+    // Opening book for first few moves
+    if (moveHistory.length < 3) {
+        const openingMove = getOpeningMove();
+        if (openingMove) return openingMove;
     }
+
+    // Use advanced minimax with deeper search
+    return getBestMove(4); // Depth 4 instead of 3
 }
 
-function getRandomMove() {
-    const emptyCells = [];
-    for (let row = 0; row < BOARD_SIZE; row++) {
-        for (let col = 0; col < BOARD_SIZE; col++) {
-            if (board[row][col] === null) {
-                emptyCells.push({ row, col });
+// Find immediate winning move or blocking move
+function findImmediateWin(player) {
+    const relevantCells = getRelevantCells();
+
+    for (const { row, col } of relevantCells) {
+        if (board[row][col] === null) {
+            // Try this move
+            board[row][col] = player;
+            const winning = checkWin(row, col);
+            board[row][col] = null;
+
+            if (winning) {
+                return { row, col };
             }
         }
     }
-    if (emptyCells.length === 0) return null;
-    return emptyCells[Math.floor(Math.random() * emptyCells.length)];
+
+    return null;
+}
+
+// Opening book - optimal first moves
+function getOpeningMove() {
+    const center = Math.floor(BOARD_SIZE / 2);
+
+    // First move: play center
+    if (moveHistory.length === 0) {
+        return { row: center, col: center };
+    }
+
+    // Second move (AI's first move): play near opponent
+    if (moveHistory.length === 1) {
+        const firstMove = moveHistory[0];
+        const distances = [
+            { row: firstMove.row - 1, col: firstMove.col - 1 },
+            { row: firstMove.row - 1, col: firstMove.col + 1 },
+            { row: firstMove.row + 1, col: firstMove.col - 1 },
+            { row: firstMove.row + 1, col: firstMove.col + 1 },
+        ];
+
+        for (const pos of distances) {
+            if (pos.row >= 0 && pos.row < BOARD_SIZE &&
+                pos.col >= 0 && pos.col < BOARD_SIZE &&
+                board[pos.row][pos.col] === null) {
+                return pos;
+            }
+        }
+    }
+
+    // Third move: find strategic position
+    if (moveHistory.length === 2) {
+        const strategicMoves = getStrategicMoves();
+        if (strategicMoves.length > 0) {
+            return strategicMoves[0];
+        }
+    }
+
+    return null;
+}
+
+// Get strategic moves (near existing pieces, center-weighted)
+function getStrategicMoves() {
+    const moves = [];
+    const center = Math.floor(BOARD_SIZE / 2);
+
+    for (let row = 0; row < BOARD_SIZE; row++) {
+        for (let col = 0; col < BOARD_SIZE; col++) {
+            if (board[row][col] === null) {
+                // Check if near any piece
+                let hasNeighbor = false;
+                for (let dr = -1; dr <= 1; dr++) {
+                    for (let dc = -1; dc <= 1; dc++) {
+                        const nr = row + dr;
+                        const nc = col + dc;
+                        if (nr >= 0 && nr < BOARD_SIZE &&
+                            nc >= 0 && nc < BOARD_SIZE &&
+                            board[nr][nc] !== null) {
+                            hasNeighbor = true;
+                            break;
+                        }
+                    }
+                    if (hasNeighbor) break;
+                }
+
+                if (hasNeighbor) {
+                    const distFromCenter = Math.abs(row - center) + Math.abs(col - center);
+                    moves.push({ row, col, priority: -distFromCenter });
+                }
+            }
+        }
+    }
+
+    moves.sort((a, b) => b.priority - a.priority);
+    return moves;
 }
 
 function getBestMove(depth) {
     let bestScore = -Infinity;
     let bestMove = null;
 
-    // Get relevant cells (cells near existing pieces)
+    // Get relevant cells and order them by priority
     const relevantCells = getRelevantCells();
+    const orderedMoves = orderMoves(relevantCells);
 
-    for (const { row, col } of relevantCells) {
+    for (const { row, col } of orderedMoves) {
         if (board[row][col] === null) {
             board[row][col] = 'O';
             const score = minimax(depth - 1, -Infinity, Infinity, false);
@@ -296,7 +386,77 @@ function getBestMove(depth) {
         }
     }
 
-    return bestMove || getRandomMove();
+    return bestMove || (orderedMoves[0] ? orderedMoves[0] : null);
+}
+
+// Order moves for better alpha-beta pruning
+function orderMoves(moves) {
+    const scored = moves.map(move => {
+        // Simulate move and get quick evaluation
+        board[move.row][move.col] = 'O';
+        const score = quickEvaluate(move.row, move.col, 'O');
+        board[move.row][move.col] = null;
+
+        return { ...move, score };
+    });
+
+    // Sort by score descending (best moves first)
+    scored.sort((a, b) => b.score - a.score);
+    return scored;
+}
+
+// Quick evaluation for move ordering
+function quickEvaluate(row, col, player) {
+    let score = 0;
+    const directions = [
+        [0, 1], [1, 0], [1, 1], [1, -1]
+    ];
+
+    for (const [dx, dy] of directions) {
+        let count = 1;
+        let blocked = 0;
+
+        // Check positive direction
+        for (let i = 1; i < 5; i++) {
+            const nr = row + dx * i;
+            const nc = col + dy * i;
+            if (nr < 0 || nr >= BOARD_SIZE || nc < 0 || nc >= BOARD_SIZE) {
+                blocked++;
+                break;
+            }
+            if (board[nr][nc] === player) count++;
+            else if (board[nr][nc] !== null) {
+                blocked++;
+                break;
+            }
+            else break;
+        }
+
+        // Check negative direction
+        for (let i = 1; i < 5; i++) {
+            const nr = row - dx * i;
+            const nc = col - dy * i;
+            if (nr < 0 || nr >= BOARD_SIZE || nc < 0 || nc >= BOARD_SIZE) {
+                blocked++;
+                break;
+            }
+            if (board[nr][nc] === player) count++;
+            else if (board[nr][nc] !== null) {
+                blocked++;
+                break;
+            }
+            else break;
+        }
+
+        // Score based on count and blocked ends
+        if (count >= 4) score += 100000;
+        else if (count === 3 && blocked === 0) score += 5000;
+        else if (count === 3 && blocked === 1) score += 1000;
+        else if (count === 2 && blocked === 0) score += 500;
+        else if (count === 2 && blocked === 1) score += 100;
+    }
+
+    return score;
 }
 
 function minimax(depth, alpha, beta, isMaximizing) {
@@ -380,8 +540,160 @@ function evaluatePosition(row, col) {
     for (const [dx, dy] of directions) {
         let count = 1;
         let openEnds = 0;
+        let spaces = 0; // Count empty spaces within pattern
 
         // Check positive direction
+        let r = row + dx;
+        let c = col + dy;
+        let consecutiveEmpty = 0;
+
+        for (let i = 0; i < 5; i++) {
+            if (r < 0 || r >= BOARD_SIZE || c < 0 || c >= BOARD_SIZE) break;
+
+            if (board[r][c] === player) {
+                count++;
+                consecutiveEmpty = 0;
+            } else if (board[r][c] === null) {
+                consecutiveEmpty++;
+                if (consecutiveEmpty === 1) {
+                    openEnds++;
+                    spaces++;
+                }
+                if (i === 0) openEnds++;
+            } else {
+                break; // Blocked by opponent
+            }
+
+            r += dx;
+            c += dy;
+        }
+
+        // Check negative direction
+        r = row - dx;
+        c = col - dy;
+        consecutiveEmpty = 0;
+
+        for (let i = 0; i < 5; i++) {
+            if (r < 0 || r >= BOARD_SIZE || c < 0 || c >= BOARD_SIZE) break;
+
+            if (board[r][c] === player) {
+                count++;
+                consecutiveEmpty = 0;
+            } else if (board[r][c] === null) {
+                consecutiveEmpty++;
+                if (consecutiveEmpty === 1) {
+                    openEnds++;
+                    spaces++;
+                }
+                if (i === 0) openEnds++;
+            } else {
+                break; // Blocked by opponent
+            }
+
+            r -= dx;
+            c -= dy;
+        }
+
+        // Advanced scoring based on patterns
+        let lineScore = 0;
+
+        if (count >= 5) {
+            lineScore = 1000000; // Win
+        } else if (count === 4) {
+            if (openEnds >= 1) lineScore = 100000; // Four with opening - very dangerous
+            else lineScore = 500; // Four blocked both ends
+        } else if (count === 3) {
+            if (openEnds === 2) lineScore = 50000; // Open three - very strong
+            else if (openEnds === 1) lineScore = 5000; // Semi-open three
+            else lineScore = 100; // Blocked three
+        } else if (count === 2) {
+            if (openEnds === 2 && spaces === 1) lineScore = 2000; // Split two with space
+            else if (openEnds === 2) lineScore = 1000; // Open two
+            else if (openEnds === 1) lineScore = 200; // Semi-open two
+            else lineScore = 50; // Blocked two
+        } else if (count === 1) {
+            if (openEnds === 2) lineScore = 100; // Single with openings
+            else if (openEnds === 1) lineScore = 10;
+        }
+
+        score += player === 'O' ? lineScore : -lineScore;
+    }
+
+    // Bonus for center control
+    const center = Math.floor(BOARD_SIZE / 2);
+    const distFromCenter = Math.abs(row - center) + Math.abs(col - center);
+    const centerBonus = (BOARD_SIZE - distFromCenter) * 5;
+    score += player === 'O' ? centerBonus : -centerBonus;
+
+    return score;
+}
+
+function getRelevantCells() {
+    const relevant = new Map(); // Use Map to store priority
+    const distance = 2;
+
+    // First, add cells near threats (higher priority)
+    for (let row = 0; row < BOARD_SIZE; row++) {
+        for (let col = 0; col < BOARD_SIZE; col++) {
+            if (board[row][col] !== null) {
+                // Calculate threat level of this piece
+                const threatLevel = calculateThreatLevel(row, col);
+
+                // Add cells around this piece with priority based on threat
+                for (let dr = -distance; dr <= distance; dr++) {
+                    for (let dc = -distance; dc <= distance; dc++) {
+                        if (dr === 0 && dc === 0) continue;
+
+                        const nr = row + dr;
+                        const nc = col + dc;
+
+                        if (nr >= 0 && nr < BOARD_SIZE && nc >= 0 && nc < BOARD_SIZE && board[nr][nc] === null) {
+                            const key = `${nr},${nc}`;
+                            const currentPriority = relevant.get(key) || 0;
+                            const distFactor = Math.max(0, distance - Math.abs(dr) - Math.abs(dc));
+                            const newPriority = threatLevel * distFactor;
+
+                            if (newPriority > currentPriority) {
+                                relevant.set(key, newPriority);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // If board is empty, start from center
+    if (relevant.size === 0) {
+        const center = Math.floor(BOARD_SIZE / 2);
+        relevant.set(`${center},${center}`, 100);
+    }
+
+    // Convert to array and sort by priority
+    const cells = Array.from(relevant.entries()).map(([pos, priority]) => {
+        const [row, col] = pos.split(',').map(Number);
+        return { row, col, priority };
+    });
+
+    cells.sort((a, b) => b.priority - a.priority);
+
+    return cells;
+}
+
+// Calculate how threatening a position is
+function calculateThreatLevel(row, col) {
+    const player = board[row][col];
+    const directions = [
+        [0, 1], [1, 0], [1, 1], [1, -1]
+    ];
+
+    let maxThreat = 0;
+
+    for (const [dx, dy] of directions) {
+        let count = 1;
+        let openEnds = 0;
+
+        // Count consecutive pieces and open ends
         let r = row + dx;
         let c = col + dy;
         while (r >= 0 && r < BOARD_SIZE && c >= 0 && c < BOARD_SIZE && board[r][c] === player) {
@@ -393,7 +705,6 @@ function evaluatePosition(row, col) {
             openEnds++;
         }
 
-        // Check negative direction
         r = row - dx;
         c = col - dy;
         while (r >= 0 && r < BOARD_SIZE && c >= 0 && c < BOARD_SIZE && board[r][c] === player) {
@@ -405,50 +716,18 @@ function evaluatePosition(row, col) {
             openEnds++;
         }
 
-        // Score based on count and open ends
-        let lineScore = 0;
-        if (count >= 5) lineScore = 100000;
-        else if (count === 4) lineScore = openEnds === 2 ? 10000 : 1000;
-        else if (count === 3) lineScore = openEnds === 2 ? 1000 : 100;
-        else if (count === 2) lineScore = openEnds === 2 ? 100 : 10;
+        // Calculate threat level
+        let threat = 0;
+        if (count >= 4) threat = 1000;
+        else if (count === 3 && openEnds === 2) threat = 500;
+        else if (count === 3 && openEnds === 1) threat = 300;
+        else if (count === 2 && openEnds === 2) threat = 100;
+        else if (count === 2 && openEnds === 1) threat = 50;
 
-        score += player === 'O' ? lineScore : -lineScore;
+        maxThreat = Math.max(maxThreat, threat);
     }
 
-    return score;
-}
-
-function getRelevantCells() {
-    const relevant = new Set();
-    const distance = 2;
-
-    for (let row = 0; row < BOARD_SIZE; row++) {
-        for (let col = 0; col < BOARD_SIZE; col++) {
-            if (board[row][col] !== null) {
-                // Add cells around this piece
-                for (let dr = -distance; dr <= distance; dr++) {
-                    for (let dc = -distance; dc <= distance; dc++) {
-                        const nr = row + dr;
-                        const nc = col + dc;
-                        if (nr >= 0 && nr < BOARD_SIZE && nc >= 0 && nc < BOARD_SIZE && board[nr][nc] === null) {
-                            relevant.add(`${nr},${nc}`);
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    // If board is empty, start from center
-    if (relevant.size === 0) {
-        const center = Math.floor(BOARD_SIZE / 2);
-        relevant.add(`${center},${center}`);
-    }
-
-    return Array.from(relevant).map(pos => {
-        const [row, col] = pos.split(',').map(Number);
-        return { row, col };
-    });
+    return maxThreat;
 }
 
 // ================================
