@@ -3,28 +3,121 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Cờ Caro - Gomoku</title>
+    <title>Cờ Caro Pro - Game Cờ Caro Thông Minh</title>
     <link rel="stylesheet" href="style.css">
 </head>
 <body>
     <div class="container">
-        <h1>Cờ Caro</h1>
+        <div class="header">
+            <h1>🎮 Cờ Caro Pro</h1>
+            <button id="darkModeToggle" class="dark-mode-toggle" title="Chuyển chế độ tối">🌙</button>
+        </div>
 
+        <!-- Settings Panel -->
+        <div class="settings-panel" id="settingsPanel">
+            <h3>⚙️ Cài Đặt Game</h3>
+
+            <div class="setting-group">
+                <label>Chế độ chơi:</label>
+                <select id="gameMode" class="select-input">
+                    <option value="pvp">Người vs Người</option>
+                    <option value="pvc">Người vs Máy</option>
+                </select>
+            </div>
+
+            <div class="setting-group" id="aiDifficultyGroup" style="display: none;">
+                <label>Độ khó AI:</label>
+                <select id="aiDifficulty" class="select-input">
+                    <option value="easy">Dễ</option>
+                    <option value="medium">Trung bình</option>
+                    <option value="hard">Khó</option>
+                </select>
+            </div>
+
+            <div class="setting-group">
+                <label>Kích thước bàn cờ:</label>
+                <select id="boardSize" class="select-input">
+                    <option value="10">10×10</option>
+                    <option value="15" selected>15×15</option>
+                    <option value="19">19×19</option>
+                </select>
+            </div>
+
+            <div class="setting-group">
+                <label>
+                    <input type="checkbox" id="soundToggle" checked>
+                    Bật âm thanh
+                </label>
+            </div>
+
+            <div class="setting-group">
+                <label>
+                    <input type="checkbox" id="timerToggle">
+                    Bật đồng hồ đếm giờ
+                </label>
+            </div>
+
+            <button id="startGameBtn" class="btn btn-primary">🎯 Bắt Đầu Game Mới</button>
+        </div>
+
+        <!-- Game Stats -->
+        <div class="stats-panel">
+            <div class="stat-box">
+                <div class="stat-label">X Thắng</div>
+                <div class="stat-value player-x" id="xWins">0</div>
+            </div>
+            <div class="stat-box">
+                <div class="stat-label">Hòa</div>
+                <div class="stat-value" id="draws">0</div>
+            </div>
+            <div class="stat-box">
+                <div class="stat-label">O Thắng</div>
+                <div class="stat-value player-o" id="oWins">0</div>
+            </div>
+        </div>
+
+        <!-- Game Info -->
         <div class="game-info">
-            <div class="status" id="status">Lượt của: <span class="player-x">X</span></div>
-            <button id="resetBtn" class="reset-btn">Chơi Lại</button>
+            <div class="status-container">
+                <div class="status" id="status">Lượt của: <span class="player-x">X</span></div>
+                <div class="timer" id="timer" style="display: none;">
+                    <span id="timerDisplay">00:00</span>
+                </div>
+            </div>
+            <div class="game-controls">
+                <button id="undoBtn" class="btn btn-secondary" disabled title="Hoàn tác">↶ Undo</button>
+                <button id="redoBtn" class="btn btn-secondary" disabled title="Làm lại">↷ Redo</button>
+                <button id="hintBtn" class="btn btn-secondary" title="Gợi ý nước đi">💡 Gợi ý</button>
+                <button id="resetBtn" class="btn btn-danger">🔄 Chơi Lại</button>
+            </div>
         </div>
 
-        <div class="board-container">
-            <div id="board" class="board"></div>
+        <!-- Main Game Area -->
+        <div class="game-container">
+            <!-- Board -->
+            <div class="board-container">
+                <canvas id="particles" class="particles-canvas"></canvas>
+                <div id="board" class="board"></div>
+            </div>
+
+            <!-- Move History -->
+            <div class="history-panel">
+                <h3>📜 Lịch Sử Nước Đi</h3>
+                <div id="moveHistory" class="move-history"></div>
+                <button id="clearHistoryBtn" class="btn btn-small">Xóa lịch sử</button>
+            </div>
         </div>
 
+        <!-- Rules -->
         <div class="rules">
-            <h3>Luật Chơi:</h3>
+            <h3>📖 Luật Chơi:</h3>
             <ul>
-                <li>2 người chơi lần lượt đặt quân X và O</li>
-                <li>Người đầu tiên xếp được 5 quân liên tiếp (ngang, dọc, hoặc chéo) sẽ thắng</li>
-                <li>Bàn cờ 15×15 ô</li>
+                <li>🎯 Hai người chơi lần lượt đặt quân X và O trên bàn cờ</li>
+                <li>🏆 Người đầu tiên xếp được 5 quân liên tiếp (ngang, dọc, hoặc chéo) sẽ thắng</li>
+                <li>🤖 Chế độ AI có 3 mức độ: Dễ, Trung bình, và Khó</li>
+                <li>💡 Sử dụng nút "Gợi ý" để nhận gợi ý nước đi tốt</li>
+                <li>↶↷ Sử dụng Undo/Redo để hoàn tác hoặc làm lại nước đi</li>
+                <li>🌙 Chuyển đổi chế độ Dark Mode cho trải nghiệm tốt hơn</li>
             </ul>
         </div>
     </div>
