@@ -702,6 +702,13 @@ function getAIMove() {
         return opponentOpenThree;
     }
 
+    // 4.5 Check for ANY opponent 3-in-a-row (defensive priority)
+    const opponentThreeMove = scanForAnyThreeInRow('X');
+    if (opponentThreeMove) {
+        console.log('🛡️ Blocking opponent 3-in-a-row!');
+        return opponentThreeMove;
+    }
+
     // 5. Check if we can create 4-in-a-row
     const ourFourMove = scanForFourInRow('O');
     if (ourFourMove) {
@@ -709,14 +716,21 @@ function getAIMove() {
         return ourFourMove;
     }
 
-    // 6. Check for double threats from opponent
+    // 6. Check for opponent's open two (2-in-a-row with both ends open)
+    const opponentOpenTwo = scanForOpenTwo('X');
+    if (opponentOpenTwo) {
+        console.log('🛡️ Blocking opponent open two!');
+        return opponentOpenTwo;
+    }
+
+    // 7. Check for double threats from opponent
     const blockMove = findCriticalDefense('X');
     if (blockMove) {
         console.log('🛡️ Blocking critical threat!');
         return blockMove;
     }
 
-    // 7. Try to create winning threat
+    // 8. Try to create winning threat
     const winThreat = findWinningThreat('O');
     if (winThreat) {
         console.log('⚔️ Creating winning threat!');
@@ -819,6 +833,90 @@ function scanForOpenThree(player) {
 
                     // Open three: 3 pieces with 2 open ends
                     if (pattern.count === 3 && pattern.openEnds === 2) {
+                        const blockPos = findBlockingPosition(row, col, dx, dy, player, pattern);
+                        if (blockPos) {
+                            // Prioritize based on position quality
+                            board[blockPos.row][blockPos.col] = 'O';
+                            const quality = quickEvaluate(blockPos.row, blockPos.col, 'O');
+                            board[blockPos.row][blockPos.col] = null;
+
+                            if (quality > maxThreat) {
+                                maxThreat = quality;
+                                bestMove = blockPos;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    return bestMove;
+}
+
+// Scan for ANY 3-in-a-row pattern (including semi-open) - AGGRESSIVE DEFENSE
+function scanForAnyThreeInRow(player) {
+    const directions = [
+        [0, 1],   // Horizontal
+        [1, 0],   // Vertical
+        [1, 1],   // Diagonal \
+        [1, -1]   // Diagonal /
+    ];
+
+    let bestMove = null;
+    let maxThreat = 0;
+
+    // Scan entire board
+    for (let row = 0; row < BOARD_SIZE; row++) {
+        for (let col = 0; col < BOARD_SIZE; col++) {
+            if (board[row][col] === player) {
+                // Check each direction
+                for (const [dx, dy] of directions) {
+                    const pattern = getLinePattern(row, col, dx, dy, player);
+
+                    // ANY 3-in-a-row pattern with at least 1 open end
+                    if (pattern.count === 3 && pattern.openEnds >= 1) {
+                        const blockPos = findBlockingPosition(row, col, dx, dy, player, pattern);
+                        if (blockPos) {
+                            // Prioritize based on position quality
+                            board[blockPos.row][blockPos.col] = 'O';
+                            const quality = quickEvaluate(blockPos.row, blockPos.col, 'O');
+                            board[blockPos.row][blockPos.col] = null;
+
+                            if (quality > maxThreat) {
+                                maxThreat = quality;
+                                bestMove = blockPos;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    return bestMove;
+}
+
+// Scan for open two patterns (2-in-a-row with both ends open) - PROACTIVE DEFENSE
+function scanForOpenTwo(player) {
+    const directions = [
+        [0, 1],   // Horizontal
+        [1, 0],   // Vertical
+        [1, 1],   // Diagonal \
+        [1, -1]   // Diagonal /
+    ];
+
+    let bestMove = null;
+    let maxThreat = 0;
+
+    // Scan entire board
+    for (let row = 0; row < BOARD_SIZE; row++) {
+        for (let col = 0; col < BOARD_SIZE; col++) {
+            if (board[row][col] === player) {
+                // Check each direction
+                for (const [dx, dy] of directions) {
+                    const pattern = getLinePattern(row, col, dx, dy, player);
+
+                    // Open two: 2 pieces with 2 open ends
+                    if (pattern.count === 2 && pattern.openEnds === 2) {
                         const blockPos = findBlockingPosition(row, col, dx, dy, player, pattern);
                         if (blockPos) {
                             // Prioritize based on position quality
@@ -1588,9 +1686,10 @@ function evaluateBoard() {
         }
     }
 
-    // CRITICAL: Defense is MORE important than offense in Gomoku
-    // Multiply opponent threats by 1.2 to prioritize blocking
-    return aiScore - (opponentScore * 1.2);
+    // CRITICAL: Defense is MUCH MORE important than offense in Gomoku
+    // Defense multiplier 3.0 - AI must prioritize blocking threats above all
+    // This ensures AI will ALWAYS block dangerous patterns before attacking
+    return aiScore - (opponentScore * 3.0);
 }
 
 function evaluatePosition(row, col, player) {

@@ -102,6 +102,14 @@ h1 {
     color: var(--color-text);
 }
 
+.version {
+    font-size: 14px;
+    font-weight: var(--font-weight-regular);
+    color: var(--color-text-secondary);
+    opacity: 0.6;
+    margin-left: var(--space-xs);
+}
+
 .header-controls {
     display: flex;
     gap: var(--space-sm);
