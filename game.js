@@ -1350,19 +1350,43 @@ function getStrategicMoves() {
 // Iterative deepening - progressively deeper search
 function getBestMoveIterative() {
     let bestMove = null;
-    const maxDepth = 6;
-    const timeLimit = 4000; // 4 seconds max
+    // Dynamic depth based on board complexity
+    const emptyCount = board.flat().filter(c => c === null).length;
+    const totalCells = BOARD_SIZE * BOARD_SIZE;
+    let maxDepth = 8; // Increased from 6 to 8
+
+    // Adjust depth based on game phase
+    if (emptyCount > totalCells * 0.8) {
+        maxDepth = 6; // Opening: less depth needed
+    } else if (emptyCount < totalCells * 0.3) {
+        maxDepth = 10; // Endgame: can search deeper
+    }
+
+    const timeLimit = 5000; // 5 seconds max (increased from 4)
     const startTime = Date.now();
 
     // Get relevant cells
     const relevantCells = getRelevantCells();
     let orderedMoves = orderMoves(relevantCells);
 
-    // Try VCF search first (threat space search)
-    const vcfMove = searchVCF('O', 10);
-    if (vcfMove) return vcfMove;
+    // Try VCT search first (most powerful threat search)
+    const vctMove = searchVCT('O', 10);
+    if (vctMove) {
+        console.log('🎯 VCT winning sequence found!');
+        return vctMove;
+    }
 
-    // Iterative deepening from depth 1 to maxDepth
+    // Try VCF search (threat space search) with increased depth
+    const vcfMove = searchVCF('O', 12); // Increased from 10 to 12
+    if (vcfMove) {
+        console.log('🎯 VCF winning sequence found!');
+        return vcfMove;
+    }
+
+    let previousScore = 0;
+    const aspirationWindow = 50; // Initial aspiration window size
+
+    // Iterative deepening from depth 1 to maxDepth with ASPIRATION WINDOWS
     for (let depth = 1; depth <= maxDepth; depth++) {
         let bestScore = -Infinity;
         let currentBestMove = null;
@@ -1373,31 +1397,67 @@ function getBestMoveIterative() {
             orderedMoves.unshift(bestMove);
         }
 
-        for (const { row, col } of orderedMoves) {
-            // Check time limit
-            if (Date.now() - startTime > timeLimit) {
-                return bestMove || orderedMoves[0];
+        // === ASPIRATION WINDOWS ===
+        // Start with narrow window around previous score (except first iteration)
+        let alpha = depth > 2 ? previousScore - aspirationWindow : -Infinity;
+        let beta = depth > 2 ? previousScore + aspirationWindow : Infinity;
+        let searchAgain = true;
+        let windowExpansions = 0;
+
+        while (searchAgain && windowExpansions < 3) {
+            searchAgain = false;
+            bestScore = -Infinity;
+
+            for (const { row, col } of orderedMoves) {
+                // Check time limit
+                if (Date.now() - startTime > timeLimit) {
+                    return bestMove || orderedMoves[0];
+                }
+
+                if (board[row][col] === null) {
+                    board[row][col] = 'O';
+                    const score = minimax(depth - 1, alpha, beta, false, depth);
+                    board[row][col] = null;
+
+                    if (score > bestScore) {
+                        bestScore = score;
+                        currentBestMove = { row, col };
+                    }
+
+                    // Update alpha
+                    if (score > alpha) {
+                        alpha = score;
+                    }
+
+                    // Beta cutoff
+                    if (score >= beta) {
+                        break;
+                    }
+
+                    // If we found a winning move, return immediately
+                    if (bestScore >= 999000) {
+                        return currentBestMove;
+                    }
+                }
             }
 
-            if (board[row][col] === null) {
-                board[row][col] = 'O';
-                const score = minimax(depth - 1, -Infinity, Infinity, false, depth);
-                board[row][col] = null;
-
-                if (score > bestScore) {
-                    bestScore = score;
-                    currentBestMove = { row, col };
-                }
-
-                // If we found a winning move, return immediately
-                if (bestScore >= 999000) {
-                    return currentBestMove;
-                }
+            // Check if we need to re-search with wider window
+            if (bestScore <= alpha - aspirationWindow) {
+                // Failed low - expand window downward
+                alpha = -Infinity;
+                searchAgain = true;
+                windowExpansions++;
+            } else if (bestScore >= beta) {
+                // Failed high - expand window upward
+                beta = Infinity;
+                searchAgain = true;
+                windowExpansions++;
             }
         }
 
         if (currentBestMove) {
             bestMove = currentBestMove;
+            previousScore = bestScore;
         }
     }
 
@@ -1469,39 +1529,151 @@ function searchVCF(player, maxDepth) {
     return null;
 }
 
-// Order moves for better alpha-beta pruning (with killer moves + learning)
+// VCT (Victory by Continuous Threats) Search - More powerful than VCF
+function searchVCT(player, maxDepth) {
+    if (maxDepth <= 0) return null;
+
+    const relevantCells = getRelevantCells();
+    const opponent = player === 'O' ? 'X' : 'O';
+
+    // Try all attacking moves
+    for (const { row, col } of relevantCells) {
+        if (board[row][col] === null) {
+            board[row][col] = player;
+
+            // Check if this creates a significant threat
+            const threats = analyzePatterns(row, col, player);
+
+            // VCT accepts both open-fours and strong open-threes
+            if (threats.openFours >= 1 || (threats.openThrees >= 2) || (threats.openThrees >= 1 && maxDepth > 6)) {
+                board[row][col] = null;
+
+                // Find all possible defense moves
+                const defenses = [];
+                for (const { row: dr, col: dc } of relevantCells) {
+                    if (board[dr][dc] === null) {
+                        board[dr][dc] = opponent;
+                        board[row][col] = player;
+
+                        const stillThreat = analyzePatterns(row, col, player);
+                        // Check if this defense actually blocks the threat
+                        if (threats.openFours >= 1 && stillThreat.openFours === 0) {
+                            defenses.push({ row: dr, col: dc });
+                        } else if (threats.openThrees >= 2 && stillThreat.openThrees < threats.openThrees) {
+                            defenses.push({ row: dr, col: dc });
+                        }
+
+                        board[row][col] = null;
+                        board[dr][dc] = null;
+                    }
+                }
+
+                // If there's only one or two defenses, continue VCT search
+                if (defenses.length <= 2 && defenses.length > 0) {
+                    let allDefensesFail = true;
+
+                    for (const defense of defenses) {
+                        board[row][col] = player;
+                        board[defense.row][defense.col] = opponent;
+
+                        const nextVCT = searchVCT(player, maxDepth - 1);
+
+                        board[defense.row][defense.col] = null;
+                        board[row][col] = null;
+
+                        if (!nextVCT && maxDepth <= 8) {
+                            allDefensesFail = false;
+                            break;
+                        }
+                    }
+
+                    if (allDefensesFail || maxDepth > 8) {
+                        return { row, col };
+                    }
+                } else if (defenses.length === 0) {
+                    // No defense possible - winning move!
+                    return { row, col };
+                }
+
+                board[row][col] = player;
+            }
+
+            board[row][col] = null;
+        }
+    }
+
+    return null;
+}
+
+// ENHANCED Move Ordering with multiple heuristics
 function orderMoves(moves, depth = 0) {
+    const center = Math.floor(BOARD_SIZE / 2);
+
     const scored = moves.map(move => {
         let score = 0;
 
-        // Check killer moves first (moves that caused cutoffs in other branches)
+        // 1. Check killer moves first (moves that caused cutoffs in other branches)
         if (killerMoves[depth]) {
             for (const killer of killerMoves[depth]) {
                 if (killer && killer.row === move.row && killer.col === move.col) {
-                    score += 50000; // High priority for killer moves
+                    score += 100000; // Very high priority for killer moves
                     break;
                 }
             }
         }
 
-        // Simulate move and get quick evaluation
-        board[move.row][move.col] = 'O';
+        // 2. History heuristic (successful moves from past searches)
+        if (historyTable[move.row] && historyTable[move.row][move.col]) {
+            score += historyTable[move.row][move.col] * 10;
+        }
 
-        // Add learned move quality (from experience)
+        // 3. Simulate AI move and check offensive threats
+        board[move.row][move.col] = 'O';
+        const ourThreats = analyzePatterns(move.row, move.col, 'O');
+        const offensiveScore =
+            ourThreats.openFours * 500000 +
+            ourThreats.openThrees * 50000 +
+            ourThreats.semiOpenThrees * 5000 +
+            quickEvaluate(move.row, move.col, 'O');
+        score += offensiveScore;
+        board[move.row][move.col] = null;
+
+        // 4. Check defensive value (what opponent threats does this block?)
+        board[move.row][move.col] = 'X';
+        const opponentThreats = analyzePatterns(move.row, move.col, 'X');
+        const defensiveScore =
+            opponentThreats.openFours * 800000 + // CRITICAL: blocking opponent open-four
+            opponentThreats.openThrees * 80000 +  // Very important
+            opponentThreats.semiOpenThrees * 8000;
+        score += defensiveScore;
+        board[move.row][move.col] = null;
+
+        // 5. Add learned move quality (from experience)
+        board[move.row][move.col] = 'O';
         const posHash = getBoardHash();
         const learnedQuality = getLearnedMoveQuality(posHash);
-        score += learnedQuality;
-
-        // Base evaluation
-        score += quickEvaluate(move.row, move.col, 'O');
-
-        // Check threats created (using adaptive weights)
-        const threats = analyzePatterns(move.row, move.col, 'O');
-        score += threats.openFours * experienceDB.adaptiveWeights.openFour / 100;
-        score += threats.openThrees * experienceDB.adaptiveWeights.openThree / 100;
-        score += threats.semiOpenThrees * experienceDB.adaptiveWeights.semiOpenThree / 10;
-
+        score += learnedQuality * 100;
         board[move.row][move.col] = null;
+
+        // 6. Center control bonus (moves closer to center are often better)
+        const distToCenter = Math.abs(move.row - center) + Math.abs(move.col - center);
+        score += (BOARD_SIZE - distToCenter) * 10;
+
+        // 7. Proximity bonus (moves near existing pieces are more likely to be good)
+        let proximityScore = 0;
+        for (let dr = -2; dr <= 2; dr++) {
+            for (let dc = -2; dc <= 2; dc++) {
+                if (dr === 0 && dc === 0) continue;
+                const nr = move.row + dr;
+                const nc = move.col + dc;
+                if (nr >= 0 && nr < BOARD_SIZE && nc >= 0 && nc < BOARD_SIZE) {
+                    if (board[nr][nc] !== null) {
+                        proximityScore += (3 - Math.abs(dr) - Math.abs(dc)) * 50;
+                    }
+                }
+            }
+        }
+        score += proximityScore;
 
         return { ...move, score };
     });
@@ -1565,7 +1737,8 @@ function quickEvaluate(row, col, player) {
     return score;
 }
 
-function minimax(depth, alpha, beta, isMaximizing, originalDepth) {
+// ADVANCED MINIMAX with PVS (Principal Variation Search), Null Move Pruning, LMR
+function minimax(depth, alpha, beta, isMaximizing, originalDepth, allowNullMove = true) {
     // Check transposition table
     const hash = getZobristHash(isMaximizing);
     const cached = transpositionTable.get(hash);
@@ -1584,6 +1757,16 @@ function minimax(depth, alpha, beta, isMaximizing, originalDepth) {
     if (winner === 'X') return -1000000 + (originalDepth - depth); // Prefer slower losses
     if (isBoardFull() || depth === 0) return evaluateBoard();
 
+    // === NULL MOVE PRUNING ===
+    // If we're not in check and can skip our turn and still beat beta, prune
+    if (allowNullMove && depth >= 3 && !isInCheck(isMaximizing ? 'O' : 'X')) {
+        const R = 2; // Reduction factor
+        const nullScore = -minimax(depth - 1 - R, -beta, -beta + 1, !isMaximizing, originalDepth, false);
+        if (nullScore >= beta) {
+            return beta; // Null move cutoff
+        }
+    }
+
     const relevantCells = getRelevantCells();
     const depthIndex = originalDepth - depth;
 
@@ -1593,12 +1776,37 @@ function minimax(depth, alpha, beta, isMaximizing, originalDepth) {
     if (isMaximizing) {
         let maxScore = -Infinity;
         let bestMove = null;
+        let searchedMoves = 0;
 
-        for (const { row, col } of orderedMoves) {
+        for (let i = 0; i < orderedMoves.length; i++) {
+            const { row, col } = orderedMoves[i];
             if (board[row][col] === null) {
                 board[row][col] = 'O';
-                const score = minimax(depth - 1, alpha, beta, false, originalDepth);
+                let score;
+
+                // === PRINCIPAL VARIATION SEARCH (PVS) ===
+                if (searchedMoves === 0) {
+                    // First move - search with full window
+                    score = minimax(depth - 1, alpha, beta, false, originalDepth, allowNullMove);
+                } else {
+                    // === LATE MOVE REDUCTION (LMR) ===
+                    let reduction = 0;
+                    if (depth >= 3 && searchedMoves >= 4 && !isInCheck('O')) {
+                        reduction = 1;
+                        if (searchedMoves >= 8) reduction = 2;
+                    }
+
+                    // Try with null window first (PVS)
+                    score = -minimax(depth - 1 - reduction, -alpha - 1, -alpha, false, originalDepth, allowNullMove);
+
+                    // If it failed high, re-search with full window
+                    if (score > alpha && score < beta) {
+                        score = minimax(depth - 1, alpha, beta, false, originalDepth, allowNullMove);
+                    }
+                }
+
                 board[row][col] = null;
+                searchedMoves++;
 
                 if (score > maxScore) {
                     maxScore = score;
@@ -1617,20 +1825,45 @@ function minimax(depth, alpha, beta, isMaximizing, originalDepth) {
             }
         }
 
-        // Store in transposition table
+        // Store in transposition table with replacement strategy
         const flag = maxScore <= alpha ? 'upperbound' : maxScore >= beta ? 'lowerbound' : 'exact';
-        transpositionTable.set(hash, { score: maxScore, depth, flag });
+        storeTransposition(hash, maxScore, depth, flag);
 
         return maxScore;
     } else {
         let minScore = Infinity;
         let bestMove = null;
+        let searchedMoves = 0;
 
-        for (const { row, col } of orderedMoves) {
+        for (let i = 0; i < orderedMoves.length; i++) {
+            const { row, col } = orderedMoves[i];
             if (board[row][col] === null) {
                 board[row][col] = 'X';
-                const score = minimax(depth - 1, alpha, beta, true, originalDepth);
+                let score;
+
+                // === PRINCIPAL VARIATION SEARCH (PVS) ===
+                if (searchedMoves === 0) {
+                    // First move - search with full window
+                    score = minimax(depth - 1, alpha, beta, true, originalDepth, allowNullMove);
+                } else {
+                    // === LATE MOVE REDUCTION (LMR) ===
+                    let reduction = 0;
+                    if (depth >= 3 && searchedMoves >= 4 && !isInCheck('X')) {
+                        reduction = 1;
+                        if (searchedMoves >= 8) reduction = 2;
+                    }
+
+                    // Try with null window first (PVS)
+                    score = -minimax(depth - 1 - reduction, -beta, -beta + 1, true, originalDepth, allowNullMove);
+
+                    // If it failed low, re-search with full window
+                    if (score > alpha && score < beta) {
+                        score = minimax(depth - 1, alpha, beta, true, originalDepth, allowNullMove);
+                    }
+                }
+
                 board[row][col] = null;
+                searchedMoves++;
 
                 if (score < minScore) {
                     minScore = score;
@@ -1649,11 +1882,38 @@ function minimax(depth, alpha, beta, isMaximizing, originalDepth) {
             }
         }
 
-        // Store in transposition table
+        // Store in transposition table with replacement strategy
         const flag = minScore >= beta ? 'lowerbound' : minScore <= alpha ? 'upperbound' : 'exact';
-        transpositionTable.set(hash, { score: minScore, depth, flag });
+        storeTransposition(hash, minScore, depth, flag);
 
         return minScore;
+    }
+}
+
+// Check if player is in "check" (has immediate threat)
+function isInCheck(player) {
+    const opponent = player === 'O' ? 'X' : 'O';
+    // Quick check: does opponent have 4-in-a-row or open-three?
+    for (let row = 0; row < BOARD_SIZE; row++) {
+        for (let col = 0; col < BOARD_SIZE; col++) {
+            if (board[row][col] === opponent) {
+                const threats = analyzePatterns(row, col, opponent);
+                if (threats.openFours >= 1 || threats.openThrees >= 1) {
+                    return true;
+                }
+            }
+        }
+    }
+    return false;
+}
+
+// Improved transposition table storage with replacement strategy
+function storeTransposition(hash, score, depth, flag) {
+    const existing = transpositionTable.get(hash);
+
+    // Always replace or replace if new entry is deeper
+    if (!existing || depth >= existing.depth) {
+        transpositionTable.set(hash, { score, depth, flag });
     }
 }
 
