@@ -313,6 +313,43 @@ let zobristBlackTurn = 0;
 // Killer moves for move ordering
 let killerMoves = [];
 
+// History heuristic for move ordering
+let historyTable = [];
+
+// Evaluation cache để tránh tính lại
+let evaluationCache = new Map();
+
+// Pattern database - Standard Gomoku patterns
+const PATTERNS = {
+    // Winning patterns
+    FIVE: { score: 1000000, pattern: [1,1,1,1,1] },
+
+    // Critical threats (must respond)
+    OPEN_FOUR: { score: 100000, pattern: [0,1,1,1,1,0] },
+    FOUR: { score: 50000, pattern: [1,1,1,1] }, // với 1 đầu open
+
+    // Strong attacks
+    OPEN_THREE: { score: 10000, pattern: [0,1,1,1,0] },
+    BROKEN_THREE_A: { score: 8000, pattern: [0,1,1,0,1,0] }, // .XX.X.
+    BROKEN_THREE_B: { score: 8000, pattern: [0,1,0,1,1,0] }, // .X.XX.
+
+    // Medium threats
+    DOUBLE_THREE: { score: 15000 }, // 2 open-threes intersecting
+    SEMI_OPEN_THREE: { score: 3000, pattern: [1,1,1,0] }, // hoặc [0,1,1,1]
+
+    // Weak attacks
+    OPEN_TWO: { score: 1000, pattern: [0,1,1,0] },
+    SEMI_OPEN_TWO: { score: 300, pattern: [1,1,0] },
+    BROKEN_TWO: { score: 500, pattern: [0,1,0,1,0] },
+};
+
+// Initialize history table
+function initHistoryTable() {
+    historyTable = Array(BOARD_SIZE).fill(null).map(() =>
+        Array(BOARD_SIZE).fill(0)
+    );
+}
+
 // Initialize Zobrist hashing
 function initZobrist() {
     zobristTable = [];
@@ -341,10 +378,294 @@ function getZobristHash(isMaximizing) {
     return hash;
 }
 
+// ================================
+// ADVANCED PATTERN RECOGNITION
+// ================================
+
+// Detect patterns in a line with gap support
+function detectPatternsInLine(line, player) {
+    const patterns = [];
+    const len = line.length;
+
+    // Convert line to numbers: player=1, opponent=-1, empty=0
+    const numLine = line.map(cell => {
+        if (cell === player) return 1;
+        if (cell === null) return 0;
+        return -1;
+    });
+
+    // Check for FIVE
+    for (let i = 0; i <= len - 5; i++) {
+        if (numLine.slice(i, i + 5).every(c => c === 1)) {
+            patterns.push({ type: 'FIVE', score: PATTERNS.FIVE.score, pos: i });
+        }
+    }
+
+    // Check for OPEN_FOUR: _XXXX_
+    for (let i = 0; i <= len - 6; i++) {
+        if (numLine[i] === 0 &&
+            numLine.slice(i + 1, i + 5).every(c => c === 1) &&
+            numLine[i + 5] === 0) {
+            patterns.push({ type: 'OPEN_FOUR', score: PATTERNS.OPEN_FOUR.score, pos: i });
+        }
+    }
+
+    // Check for FOUR with one end open
+    for (let i = 0; i <= len - 4; i++) {
+        if (numLine.slice(i, i + 4).every(c => c === 1)) {
+            const leftOpen = (i === 0 || numLine[i - 1] === 0);
+            const rightOpen = (i + 4 >= len || numLine[i + 4] === 0);
+            if (leftOpen || rightOpen) {
+                patterns.push({ type: 'FOUR', score: PATTERNS.FOUR.score, pos: i });
+            }
+        }
+    }
+
+    // Check for OPEN_THREE: _XXX_
+    for (let i = 0; i <= len - 5; i++) {
+        if (numLine[i] === 0 &&
+            numLine.slice(i + 1, i + 4).every(c => c === 1) &&
+            numLine[i + 4] === 0) {
+            patterns.push({ type: 'OPEN_THREE', score: PATTERNS.OPEN_THREE.score, pos: i });
+        }
+    }
+
+    // Check for BROKEN_THREE: _XX_X_ or _X_XX_
+    for (let i = 0; i <= len - 6; i++) {
+        const slice = numLine.slice(i, i + 6);
+        if (slice[0] === 0 && slice[1] === 1 && slice[2] === 1 &&
+            slice[3] === 0 && slice[4] === 1 && slice[5] === 0) {
+            patterns.push({ type: 'BROKEN_THREE_A', score: PATTERNS.BROKEN_THREE_A.score, pos: i });
+        }
+        if (slice[0] === 0 && slice[1] === 1 && slice[2] === 0 &&
+            slice[3] === 1 && slice[4] === 1 && slice[5] === 0) {
+            patterns.push({ type: 'BROKEN_THREE_B', score: PATTERNS.BROKEN_THREE_B.score, pos: i });
+        }
+    }
+
+    // Check for SEMI_OPEN_THREE
+    for (let i = 0; i <= len - 4; i++) {
+        if (numLine.slice(i, i + 3).every(c => c === 1)) {
+            const leftOpen = (i === 0 || numLine[i - 1] === 0);
+            const rightOpen = (i + 3 >= len || numLine[i + 3] === 0);
+            if ((leftOpen && !rightOpen) || (!leftOpen && rightOpen)) {
+                patterns.push({ type: 'SEMI_OPEN_THREE', score: PATTERNS.SEMI_OPEN_THREE.score, pos: i });
+            }
+        }
+    }
+
+    // Check for OPEN_TWO: _XX_
+    for (let i = 0; i <= len - 4; i++) {
+        if (numLine[i] === 0 && numLine[i + 1] === 1 &&
+            numLine[i + 2] === 1 && numLine[i + 3] === 0) {
+            patterns.push({ type: 'OPEN_TWO', score: PATTERNS.OPEN_TWO.score, pos: i });
+        }
+    }
+
+    // Check for BROKEN_TWO: _X_X_
+    for (let i = 0; i <= len - 5; i++) {
+        if (numLine[i] === 0 && numLine[i + 1] === 1 &&
+            numLine[i + 2] === 0 && numLine[i + 3] === 1 &&
+            numLine[i + 4] === 0) {
+            patterns.push({ type: 'BROKEN_TWO', score: PATTERNS.BROKEN_TWO.score, pos: i });
+        }
+    }
+
+    return patterns;
+}
+
+// Get line from board in any direction
+function getLine(row, col, dx, dy, length) {
+    const line = [];
+    let r = row;
+    let c = col;
+
+    for (let i = 0; i < length; i++) {
+        if (r < 0 || r >= BOARD_SIZE || c < 0 || c >= BOARD_SIZE) {
+            break;
+        }
+        line.push(board[r][c]);
+        r += dx;
+        c += dy;
+    }
+
+    return line;
+}
+
+// Comprehensive pattern evaluation at position
+function evaluatePatternAtPosition(row, col, player) {
+    // Check cache first
+    const cacheKey = `${row},${col},${player},${getBoardHash()}`;
+    if (evaluationCache.has(cacheKey)) {
+        return evaluationCache.get(cacheKey);
+    }
+
+    let totalScore = 0;
+    const directions = [
+        [0, 1],   // Horizontal
+        [1, 0],   // Vertical
+        [1, 1],   // Diagonal \
+        [1, -1]   // Diagonal /
+    ];
+
+    const allPatterns = [];
+
+    for (const [dx, dy] of directions) {
+        // Get extended line (go back 5, forward 5)
+        const line = [];
+        for (let i = -5; i <= 5; i++) {
+            const r = row + dx * i;
+            const c = col + dy * i;
+            if (r >= 0 && r < BOARD_SIZE && c >= 0 && c < BOARD_SIZE) {
+                line.push(board[r][c]);
+            }
+        }
+
+        // Detect patterns in this line
+        const patterns = detectPatternsInLine(line, player);
+        allPatterns.push(...patterns);
+
+        // Sum scores
+        patterns.forEach(p => {
+            totalScore += p.score;
+        });
+    }
+
+    // Check for double-three (2 open threes intersecting)
+    const openThrees = allPatterns.filter(p => p.type === 'OPEN_THREE');
+    if (openThrees.length >= 2) {
+        totalScore += PATTERNS.DOUBLE_THREE.score;
+    }
+
+    // Cache result
+    evaluationCache.set(cacheKey, totalScore);
+
+    return totalScore;
+}
+
+// ================================
+// SYMMETRY NORMALIZATION FOR LEARNING
+// ================================
+
+// Get canonical form of board (for learning symmetry)
+function getCanonicalBoardForm() {
+    const forms = [];
+
+    // Original
+    forms.push(boardToString());
+
+    // Rotate 90, 180, 270
+    forms.push(boardToString(rotateBoard90()));
+    forms.push(boardToString(rotateBoard180()));
+    forms.push(boardToString(rotateBoard270()));
+
+    // Flip horizontal
+    forms.push(boardToString(flipHorizontal()));
+
+    // Flip vertical
+    forms.push(boardToString(flipVertical()));
+
+    // Flip diagonal
+    forms.push(boardToString(flipDiagonal()));
+
+    // Flip anti-diagonal
+    forms.push(boardToString(flipAntiDiagonal()));
+
+    // Return lexicographically smallest (canonical form)
+    forms.sort();
+    return forms[0];
+}
+
+function boardToString(b = board) {
+    let str = '';
+    for (let i = 0; i < BOARD_SIZE; i++) {
+        for (let j = 0; j < BOARD_SIZE; j++) {
+            str += b[i][j] === null ? '0' : (b[i][j] === 'X' ? '1' : '2');
+        }
+    }
+    return str;
+}
+
+function rotateBoard90() {
+    const newBoard = Array(BOARD_SIZE).fill(null).map(() => Array(BOARD_SIZE).fill(null));
+    for (let i = 0; i < BOARD_SIZE; i++) {
+        for (let j = 0; j < BOARD_SIZE; j++) {
+            newBoard[j][BOARD_SIZE - 1 - i] = board[i][j];
+        }
+    }
+    return newBoard;
+}
+
+function rotateBoard180() {
+    const newBoard = Array(BOARD_SIZE).fill(null).map(() => Array(BOARD_SIZE).fill(null));
+    for (let i = 0; i < BOARD_SIZE; i++) {
+        for (let j = 0; j < BOARD_SIZE; j++) {
+            newBoard[BOARD_SIZE - 1 - i][BOARD_SIZE - 1 - j] = board[i][j];
+        }
+    }
+    return newBoard;
+}
+
+function rotateBoard270() {
+    const newBoard = Array(BOARD_SIZE).fill(null).map(() => Array(BOARD_SIZE).fill(null));
+    for (let i = 0; i < BOARD_SIZE; i++) {
+        for (let j = 0; j < BOARD_SIZE; j++) {
+            newBoard[BOARD_SIZE - 1 - j][i] = board[i][j];
+        }
+    }
+    return newBoard;
+}
+
+function flipHorizontal() {
+    const newBoard = Array(BOARD_SIZE).fill(null).map(() => Array(BOARD_SIZE).fill(null));
+    for (let i = 0; i < BOARD_SIZE; i++) {
+        for (let j = 0; j < BOARD_SIZE; j++) {
+            newBoard[i][BOARD_SIZE - 1 - j] = board[i][j];
+        }
+    }
+    return newBoard;
+}
+
+function flipVertical() {
+    const newBoard = Array(BOARD_SIZE).fill(null).map(() => Array(BOARD_SIZE).fill(null));
+    for (let i = 0; i < BOARD_SIZE; i++) {
+        for (let j = 0; j < BOARD_SIZE; j++) {
+            newBoard[BOARD_SIZE - 1 - i][j] = board[i][j];
+        }
+    }
+    return newBoard;
+}
+
+function flipDiagonal() {
+    const newBoard = Array(BOARD_SIZE).fill(null).map(() => Array(BOARD_SIZE).fill(null));
+    for (let i = 0; i < BOARD_SIZE; i++) {
+        for (let j = 0; j < BOARD_SIZE; j++) {
+            newBoard[j][i] = board[i][j];
+        }
+    }
+    return newBoard;
+}
+
+function flipAntiDiagonal() {
+    const newBoard = Array(BOARD_SIZE).fill(null).map(() => Array(BOARD_SIZE).fill(null));
+    for (let i = 0; i < BOARD_SIZE; i++) {
+        for (let j = 0; j < BOARD_SIZE; j++) {
+            newBoard[BOARD_SIZE - 1 - j][BOARD_SIZE - 1 - i] = board[i][j];
+        }
+    }
+    return newBoard;
+}
+
 function getAIMove() {
-    // Reset transposition table for new move
+    // Reset for new move
     transpositionTable.clear();
     killerMoves = Array(10).fill(null).map(() => []);
+    evaluationCache.clear(); // Clear evaluation cache
+
+    // Initialize history table if needed
+    if (historyTable.length === 0) {
+        initHistoryTable();
+    }
 
     // Initialize Zobrist if not done
     if (zobristTable.length === 0) {
@@ -1253,22 +1574,26 @@ function checkWinner() {
 }
 
 function evaluateBoard() {
-    let score = 0;
+    let aiScore = 0;
+    let opponentScore = 0;
 
-    // Evaluate all possible lines
+    // Evaluate all positions using pattern recognition
     for (let row = 0; row < BOARD_SIZE; row++) {
         for (let col = 0; col < BOARD_SIZE; col++) {
-            if (board[row][col] !== null) {
-                score += evaluatePosition(row, col);
+            if (board[row][col] === 'O') {
+                aiScore += evaluatePosition(row, col, 'O');
+            } else if (board[row][col] === 'X') {
+                opponentScore += evaluatePosition(row, col, 'X');
             }
         }
     }
 
-    return score;
+    // CRITICAL: Defense is MORE important than offense in Gomoku
+    // Multiply opponent threats by 1.2 to prioritize blocking
+    return aiScore - (opponentScore * 1.2);
 }
 
-function evaluatePosition(row, col) {
-    const player = board[row][col];
+function evaluatePosition(row, col, player) {
     const directions = [
         [0, 1],   // Horizontal
         [1, 0],   // Vertical
@@ -1276,97 +1601,40 @@ function evaluatePosition(row, col) {
         [1, -1]   // Diagonal /
     ];
 
-    let score = 0;
+    let totalScore = 0;
 
     for (const [dx, dy] of directions) {
-        let count = 1;
-        let openEnds = 0;
-        let spaces = 0; // Count empty spaces within pattern
+        // Get line extending from this position
+        const line = [];
 
-        // Check positive direction
-        let r = row + dx;
-        let c = col + dy;
-        let consecutiveEmpty = 0;
-
-        for (let i = 0; i < 5; i++) {
-            if (r < 0 || r >= BOARD_SIZE || c < 0 || c >= BOARD_SIZE) break;
-
-            if (board[r][c] === player) {
-                count++;
-                consecutiveEmpty = 0;
-            } else if (board[r][c] === null) {
-                consecutiveEmpty++;
-                if (consecutiveEmpty === 1) {
-                    openEnds++;
-                    spaces++;
-                }
-                if (i === 0) openEnds++;
-            } else {
-                break; // Blocked by opponent
+        // Go back 5 positions
+        for (let i = -5; i <= 5; i++) {
+            const r = row + dx * i;
+            const c = col + dy * i;
+            if (r >= 0 && r < BOARD_SIZE && c >= 0 && c < BOARD_SIZE) {
+                line.push(board[r][c]);
             }
-
-            r += dx;
-            c += dy;
         }
 
-        // Check negative direction
-        r = row - dx;
-        c = col - dy;
-        consecutiveEmpty = 0;
+        // Detect all patterns in this line
+        const patterns = detectPatternsInLine(line, player);
 
-        for (let i = 0; i < 5; i++) {
-            if (r < 0 || r >= BOARD_SIZE || c < 0 || c >= BOARD_SIZE) break;
-
-            if (board[r][c] === player) {
-                count++;
-                consecutiveEmpty = 0;
-            } else if (board[r][c] === null) {
-                consecutiveEmpty++;
-                if (consecutiveEmpty === 1) {
-                    openEnds++;
-                    spaces++;
-                }
-                if (i === 0) openEnds++;
-            } else {
-                break; // Blocked by opponent
-            }
-
-            r -= dx;
-            c -= dy;
+        // Sum up pattern scores
+        for (const pattern of patterns) {
+            totalScore += pattern.score;
         }
-
-        // Advanced scoring based on patterns
-        let lineScore = 0;
-
-        if (count >= 5) {
-            lineScore = 1000000; // Win
-        } else if (count === 4) {
-            if (openEnds >= 1) lineScore = 100000; // Four with opening - very dangerous
-            else lineScore = 500; // Four blocked both ends
-        } else if (count === 3) {
-            if (openEnds === 2) lineScore = 50000; // Open three - very strong
-            else if (openEnds === 1) lineScore = 5000; // Semi-open three
-            else lineScore = 100; // Blocked three
-        } else if (count === 2) {
-            if (openEnds === 2 && spaces === 1) lineScore = 2000; // Split two with space
-            else if (openEnds === 2) lineScore = 1000; // Open two
-            else if (openEnds === 1) lineScore = 200; // Semi-open two
-            else lineScore = 50; // Blocked two
-        } else if (count === 1) {
-            if (openEnds === 2) lineScore = 100; // Single with openings
-            else if (openEnds === 1) lineScore = 10;
-        }
-
-        score += player === 'O' ? lineScore : -lineScore;
     }
 
-    // Bonus for center control
+    // Avoid double counting (patterns overlap)
+    totalScore /= 4;
+
+    // Center control bonus
     const center = Math.floor(BOARD_SIZE / 2);
     const distFromCenter = Math.abs(row - center) + Math.abs(col - center);
-    const centerBonus = (BOARD_SIZE - distFromCenter) * 5;
-    score += player === 'O' ? centerBonus : -centerBonus;
+    const centerBonus = (BOARD_SIZE - distFromCenter) * 10;
+    totalScore += centerBonus;
 
-    return score;
+    return totalScore;
 }
 
 function getRelevantCells() {
